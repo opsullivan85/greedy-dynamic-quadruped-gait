@@ -1,4 +1,7 @@
+from src.util import log_exceptions
+from src.gaitnet import logger
 
+@log_exceptions(logger)
 def main():
     print("Hello, GaitNet!")
 
