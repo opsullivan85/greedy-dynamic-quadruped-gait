@@ -57,4 +57,8 @@ if not logger.handlers:
     logger.propagate = False
 
 logger.info(f"log file: {log_file}")
+
+launch_str = " ".join(sys.orig_argv)
+logger.debug(f"running '{launch_str}'")
+
 logger.debug("initialized")
