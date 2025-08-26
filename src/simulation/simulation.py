@@ -49,7 +49,7 @@ from isaaclab.utils import configclass
 ##
 # Pre-defined configs
 ##
-from isaaclab_assets.robots.anymal import ANYMAL_C_CFG  # isort: skip
+from isaaclab_assets.robots.unitree import UNITREE_GO1_CFG as ROBOT_CFG # isort: skip
 
 
 @configclass
@@ -65,11 +65,11 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     )
 
     # robot
-    robot: ArticulationCfg = ANYMAL_C_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot: ArticulationCfg = ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
     # sensors
     height_scanner = RayCasterCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/base",
+        prim_path="{ENV_REGEX_NS}/Robot/trunk",
         update_period=0.02,
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
@@ -78,7 +78,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         mesh_prim_paths=["/World/defaultGroundPlane"],
     )
     contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*_FOOT", update_period=0.0, history_length=6, debug_vis=True
+        prim_path="{ENV_REGEX_NS}/Robot/.*_foot", update_period=0.0, history_length=6, debug_vis=True
     )
 
 
