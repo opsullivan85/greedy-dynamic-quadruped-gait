@@ -4,7 +4,7 @@ from nptyping import NDArray, Float32, Shape
 
 class RobotInterface(ABC):
     @abstractmethod
-    def init(self, dt: float) -> None:
+    def __init__(self, dt: float) -> None:
         pass
 
     @abstractmethod

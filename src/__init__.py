@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 class ProjectRelativeFormatter(logging.Formatter):
     """Custom formatter that shows file path relative to project root."""
 
-    def format(self, record):
+    def format(self, record: logging.LogRecord) -> str:
         try:
             path = Path(record.pathname).resolve()
             record.relpath = path.relative_to(PROJECT_ROOT)
@@ -43,7 +43,7 @@ ch.setFormatter(
 fh = logging.FileHandler(log_file, encoding="utf-8")
 fh.setLevel(logging.DEBUG)
 fh.setFormatter(
-    ProjectRelativeFormatter(
+    logging.Formatter(
         # abs path so vscode sees it as a URI in the log file
         "%(asctime)s | %(name)s | %(levelname)s | %(message)s"+"\t"*5+"[%(pathname)s:%(lineno)d]",
         "%Y-%m-%d %H:%M:%S",

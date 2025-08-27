@@ -1,10 +1,23 @@
 from src.control import RobotRunnerMin, RobotType
 from src.robotinterface import interface
 from nptyping import NDArray, Float32, Shape
+import logging
+
+logger = logging.getLogger(__file__)
 
 
 class SimInterface(interface.RobotInterface):
-    def init(self, dt: float):
+    id: int = 1
+
+    def __init__(self, dt: float, debug_logging: bool = False) -> None:
+        self.id = SimInterface.id
+        SimInterface.id += 1
+        self.logger: None | logging.Logger = None
+        if debug_logging:
+            self.logger = logger
+            self.logger.setLevel(logging.DEBUG)
+            self.logger.debug(f"Creating SimInterface instance {self.id}")
+
         self.robot_runner = RobotRunnerMin()
         self.robot_runner.init(RobotType.GO1, dt)
 
@@ -14,9 +27,25 @@ class SimInterface(interface.RobotInterface):
         body_state: NDArray[Shape["13"], Float32],
         command: NDArray[Shape["3"], Float32],
     ) -> NDArray[Shape["4, 3"], Float32]:
-        joint_states = SimInterface._convert_joint_states(joint_states=joint_states)
-        torques = self.robot_runner.run(dof_states=joint_states, body_states=body_state, commands=command)
-        return SimInterface._convert_torques(torques=torques)
+        joint_states_converted = SimInterface._convert_joint_states(
+            joint_states=joint_states
+        )
+        torques = self.robot_runner.run(
+            dof_states=joint_states_converted, body_states=body_state, commands=command
+        )
+        torques_converted = SimInterface._convert_torques(torques=torques)
+
+        if self.logger is not None:
+
+            self.logger.debug(
+                f"got torques"
+                "\t- joint_states: {joint_states}"
+                "\t- body_state: {body_state}"
+                "\t- command: {command}"
+                "\t- torques: {torques}"
+            )
+
+        return torques_converted
 
     def reset(self) -> None:
         self.robot_runner.reset()

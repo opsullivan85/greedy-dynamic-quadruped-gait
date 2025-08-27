@@ -22,7 +22,7 @@ We add the following sensors on the quadruped robot, ANYmal-C (ANYbotics):
 
 import argparse
 
-from isaaclab.app import AppLauncher
+from isaaclab.app import AppLauncher  # type: ignore
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a robot.")
@@ -40,16 +40,16 @@ simulation_app = app_launcher.app
 
 import torch
 
-import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg
-from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
-from isaaclab.utils import configclass
+import isaaclab.sim as sim_utils  # type: ignore
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg  # type: ignore
+from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # type: ignore
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: ignore
+from isaaclab.utils import configclass  # type: ignore
 
 ##
 # Pre-defined configs
 ##
-from isaaclab_assets.robots.unitree import UNITREE_GO1_CFG as ROBOT_CFG # isort: skip
+from isaaclab_assets.robots.unitree import UNITREE_GO1_CFG as ROBOT_CFG  # type: ignore
 
 
 @configclass
