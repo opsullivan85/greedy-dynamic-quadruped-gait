@@ -48,7 +48,7 @@ from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: i
 from isaaclab.utils import configclass  # type: ignore
 import numpy as np
 
-from src.robotinterface.siminterface import SimInterface
+import src.robotinterface.siminterface as SimInterface
 from src.robotinterface.interface import RobotInterfaceVect
 import logging
 logger = logging.getLogger(__name__)
@@ -64,7 +64,11 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     """Design the scene with sensors on the robot."""
 
     # ground plane
-    ground = AssetBaseCfg(prim_path="/World/defaultGroundPlane", spawn=sim_utils.GroundPlaneCfg())
+    # friction to simulate rubber on concrete
+    ground = sim_utils.GroundPlaneCfg(
+        physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.8, dynamic_friction=0.8),
+    )
+    ground = AssetBaseCfg(prim_path="/World/defaultGroundPlane", spawn=ground)
 
     # lights
     dome_light = AssetBaseCfg(
@@ -91,9 +95,9 @@ class SensorsSceneCfg(InteractiveSceneCfg):
 
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     """Run the simulator."""
-    control_interface = RobotInterfaceVect(dt=sim.get_physics_dt(), instances=args_cli.num_envs, cls=SimInterface, debug_logging=False)
+    control_interface = RobotInterfaceVect(dt=sim.get_physics_dt(), instances=args_cli.num_envs, cls=SimInterface.SimInterface, debug_logging=False)
     # make the first one log
-    control_interface.interfaces[0].logger = logging.getLogger(SimInterface.__name__)
+    control_interface.interfaces[0].logger = SimInterface.logger
 
     sim_dt = sim.get_physics_dt()
     logger.debug(f"dt: {sim_dt}")
@@ -141,6 +145,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
         body_pos = scene["robot"].data.root_pos_w.cpu().numpy()
         body_quat = scene["robot"].data.root_quat_w.cpu().numpy()
+        # re-order body quat from wxyz to xyzw
+        body_quat = np.concatenate([body_quat[..., 3:4], body_quat[..., :3]], axis=-1)
         # this is both linear and angular velocity
         body_vel = scene["robot"].data.root_vel_w.cpu().numpy()
         body_state = np.concatenate([body_pos, body_quat, body_vel], axis=-1)  # shape (:, 13)
