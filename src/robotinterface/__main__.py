@@ -11,8 +11,9 @@ def main():
     joint_states = np.zeros(shape=(4, 3, 2), dtype=np.float32)
     body_state = np.zeros(shape=(13,), dtype=np.float32)
     command = np.zeros(shape=(3,), dtype=np.float32)
-    for _ in range(100):
-        sim_interface.get_torques(joint_states=joint_states, body_state=body_state, command=command)
+    sim_interface.get_torques(joint_states=joint_states, body_state=body_state, command=command)
+    sim_interface.get_torques(joint_states=joint_states, body_state=body_state, command=command)
+    sim_interface.get_torques(joint_states=joint_states, body_state=body_state, command=command)
 
 if __name__ == "__main__":
     main()
