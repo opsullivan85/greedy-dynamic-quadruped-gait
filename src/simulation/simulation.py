@@ -141,7 +141,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         joint_pos = scene["robot"].data.joint_pos.cpu().numpy()
         joint_vel = scene["robot"].data.joint_vel.cpu().numpy()
         joint_pos_vel = np.stack([joint_pos, joint_vel], axis=-1)  # shape (:, 12, 2)
-        joint_states = joint_pos_vel.reshape(-1, 4, 3, 2)
+        # order F makes the indices correspond to the expected format for the interface
+        joint_states = joint_pos_vel.reshape(-1, 4, 3, 2, order="F")
 
         body_pos = scene["robot"].data.root_pos_w.cpu().numpy()
         body_quat = scene["robot"].data.root_quat_w.cpu().numpy()
@@ -151,6 +152,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         body_vel = scene["robot"].data.root_vel_w.cpu().numpy()
         body_state = np.concatenate([body_pos, body_quat, body_vel], axis=-1)  # shape (:, 13)
 
+        # logger.critical(scene["robot"].data.joint_names)
+        # exit(0)
+
         command = np.zeros((args_cli.num_envs, 3), dtype=np.float32)
 
         torques = control_interface.get_torques(
@@ -158,7 +162,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             body_states=body_state,
             commands=command,
         )
-        torques = torques.reshape(-1, 12)
+        # order F makes the indices correspond to the expected format for the simulator
+        torques = torques.reshape((-1, 12), order="F")
         torques = torch.from_numpy(torques).to(scene.device)
 
         scene["robot"].set_joint_effort_target(torques)
