@@ -46,6 +46,10 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # type: ignore
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
 
+from src.robotinterface.siminterface import SimInterface
+import logging
+logger = logging.getLogger(__name__)
+
 ##
 # Pre-defined configs
 ##
@@ -86,13 +90,16 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     """Run the simulator."""
     # Define simulation stepping
     sim_dt = sim.get_physics_dt()
+    logger.debug(f"dt: {sim_dt}")
     sim_time = 0.0
     count = 0
 
     # Simulate physics
     while simulation_app.is_running():
+        logger.debug(f"step: {count}")
         # Reset
         if count % 500 == 0:
+            logger.debug("resetting the simulation")
             # reset counter
             count = 0
             # reset the scene entities

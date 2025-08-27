@@ -1,5 +1,6 @@
 from src.util import log_exceptions
-from src import logger
+import logging
+logger = logging.getLogger(__file__)
 
 @log_exceptions(logger)
 def main():

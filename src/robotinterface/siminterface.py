@@ -1,9 +1,9 @@
 from src.control import RobotRunnerMin, RobotType
 from src.robotinterface import interface
 from nptyping import NDArray, Float32, Shape
-from src.robotinterface import logger
-import logging
 import numpy as np
+import logging
+logger = logging.getLogger(__name__)
 
 
 class SimInterface(interface.RobotInterface):

@@ -94,8 +94,8 @@ while len(log_files) >= max_logs:
     oldest = log_files.pop(0)
     try:
         oldest.unlink()
-        logger.debug(f"Deleted old log file: {oldest}")
+        logger.debug(f"deleted old log file: {oldest}")
     except Exception as e:
-        logger.debug(f"Failed to delete {oldest}: {e}")
+        logger.debug(f"failed to delete {oldest}: {e}")
 
 logger.debug("initialized")
