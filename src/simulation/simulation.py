@@ -21,6 +21,7 @@ We add the following sensors on the quadruped robot, ANYmal-C (ANYbotics):
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+from distutils import command
 
 from isaaclab.app import AppLauncher  # type: ignore
 
@@ -45,8 +46,10 @@ from isaaclab.assets import ArticulationCfg, AssetBaseCfg  # type: ignore
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # type: ignore
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
+import numpy as np
 
 from src.robotinterface.siminterface import SimInterface
+from src.robotinterface.interface import RobotInterfaceVect
 import logging
 logger = logging.getLogger(__name__)
 
@@ -88,7 +91,10 @@ class SensorsSceneCfg(InteractiveSceneCfg):
 
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     """Run the simulator."""
-    # Define simulation stepping
+    control_interface = RobotInterfaceVect(dt=sim.get_physics_dt(), instances=args_cli.num_envs, cls=SimInterface, debug_logging=False)
+    # make the first one log
+    control_interface.interfaces[0].logger = logging.getLogger(SimInterface.__name__)
+
     sim_dt = sim.get_physics_dt()
     logger.debug(f"dt: {sim_dt}")
     sim_time = 0.0
@@ -96,10 +102,13 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
     # Simulate physics
     while simulation_app.is_running():
-        logger.debug(f"step: {count}")
         # Reset
         if count % 500 == 0:
             logger.debug("resetting the simulation")
+
+            for interface in control_interface.interfaces:
+                interface.reset()
+
             # reset counter
             count = 0
             # reset the scene entities
@@ -119,12 +128,36 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             scene["robot"].write_joint_state_to_sim(joint_pos, joint_vel)
             # clear internal buffers
             scene.reset()
-            print("[INFO]: Resetting robot state...")
         # Apply default actions to the robot
         # -- generate actions/commands
-        targets = scene["robot"].data.default_joint_pos
+        # targets = scene["robot"].data.default_joint_pos
         # -- apply action to the robot
-        scene["robot"].set_joint_position_target(targets)
+        # scene["robot"].set_joint_position_target(targets)
+
+        joint_pos = scene["robot"].data.joint_pos.cpu().numpy()
+        joint_vel = scene["robot"].data.joint_vel.cpu().numpy()
+        joint_pos_vel = np.stack([joint_pos, joint_vel], axis=-1)  # shape (:, 12, 2)
+        joint_states = joint_pos_vel.reshape(-1, 4, 3, 2)
+
+        body_pos = scene["robot"].data.root_pos_w.cpu().numpy()
+        body_quat = scene["robot"].data.root_quat_w.cpu().numpy()
+        # this is both linear and angular velocity
+        body_vel = scene["robot"].data.root_vel_w.cpu().numpy()
+        body_state = np.concatenate([body_pos, body_quat, body_vel], axis=-1)  # shape (:, 13)
+
+        command = np.zeros((args_cli.num_envs, 3), dtype=np.float32)
+
+        torques = control_interface.get_torques(
+            joint_states=joint_states,
+            body_states=body_state,
+            commands=command,
+        )
+        torques = torques.reshape(-1, 12)
+        torques = torch.from_numpy(torques).to(scene.device)
+
+        scene["robot"].set_joint_effort_target(torques)
+
+
         # -- write data to sim
         scene.write_data_to_sim()
         # perform step
@@ -136,12 +169,12 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         scene.update(sim_dt)
 
         # print information from the sensors
-        print("-------------------------------")
-        print(scene["height_scanner"])
-        print("Received max height value: ", torch.max(scene["height_scanner"].data.ray_hits_w[..., -1]).item())
-        print("-------------------------------")
-        print(scene["contact_forces"])
-        print("Received max contact force of: ", torch.max(scene["contact_forces"].data.net_forces_w).item())
+        # print("-------------------------------")
+        # print(scene["height_scanner"])
+        # print("Received max height value: ", torch.max(scene["height_scanner"].data.ray_hits_w[..., -1]).item())
+        # print("-------------------------------")
+        # print(scene["contact_forces"])
+        # print("Received max contact force of: ", torch.max(scene["contact_forces"].data.net_forces_w).item())
 
 
 def main():
@@ -158,7 +191,7 @@ def main():
     # Play the simulator
     sim.reset()
     # Now we are ready!
-    print("[INFO]: Setup complete...")
+    logger.info("setup complete")
     # Run the simulator
     run_simulator(sim, scene)
 
