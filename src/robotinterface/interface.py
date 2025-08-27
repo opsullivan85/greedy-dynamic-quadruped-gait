@@ -3,6 +3,7 @@ from nptyping import NDArray, Float32, Shape
 from typing import Type, Generic, TypeVar
 import numpy as np
 from multiprocessing import Pool
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class RobotInterface(ABC):
@@ -50,7 +51,7 @@ class RobotInterfaceVect(Generic[T]):
         self.interfaces: list[T] = [
             cls(dt=dt, **kwargs) for _ in range(instances)
         ]
-        self.pool = Pool()
+        self.pool = ThreadPoolExecutor()
     
     def get_torques(
         self,
@@ -87,13 +88,40 @@ class RobotInterfaceVect(Generic[T]):
         assert commands.shape[0] == self.instances
 
         torques = []
-        # TODO: parallelize this with multiprocessing
+        futures = []
+        
+        # Submit tasks to the thread pool
         for i in range(self.instances):
-            torque = self.interfaces[i].get_torques(
-                joint_states=joint_states[i],
-                body_state=body_states[i],
-                command=commands[i],
+            future = self.pool.submit(
+                RobotInterfaceVect._get_torques_single,
+                self.interfaces[i],
+                joint_states[i],
+                body_states[i],
+                commands[i]
             )
-            torques.append(torque)
+            futures.append(future)
+        
+        # Collect results in order
+        torques = [future.result() for future in futures]
         
         return np.stack(torques, axis=0)
+
+    @staticmethod
+    def _get_torques_single(
+        interface: T,
+        joint_states: NDArray[Shape["4, 3, 2"], Float32],
+        body_state: NDArray[Shape["13"], Float32],
+        command: NDArray[Shape["3"], Float32],
+    ) -> NDArray[Shape["4, 3"], Float32]:
+        """Helper method to compute torques for a single instance. This method is intended to be run in a separate thread.
+
+        Args:
+            interface (RobotInterface): The robot interface instance.
+            joint_states (NDArray[Shape["4, 3, 2"], Float32]): Joint states for the instance.
+            body_state (NDArray[Shape["13"], Float32]): Body state for the instance.
+            command (NDArray[Shape["3"], Float32]): Command for the instance.
+
+        Returns:
+            NDArray[Shape["4, 3"], Float32]: Computed joint torques for the instance.
+        """
+        return interface.get_torques(joint_states=joint_states, body_state=body_state, command=command)

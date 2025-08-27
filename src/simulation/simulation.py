@@ -104,7 +104,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     while simulation_app.is_running():
         # Reset
         if count % 500 == 0:
-            logger.debug("resetting the simulation")
+            logger.info("resetting the simulation")
 
             for interface in control_interface.interfaces:
                 interface.reset()
