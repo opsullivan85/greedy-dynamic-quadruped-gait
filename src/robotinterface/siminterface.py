@@ -22,12 +22,12 @@ class SimInterface(interface.RobotInterface):
         command: NDArray[Shape["3"], Float32],
     ) -> NDArray[Shape["4, 3"], Float32]:
         joint_states_converted = SimInterface._convert_joint_states(
-            joint_states=joint_states
+            joint_states_interface=joint_states
         )
         torques = self.robot_runner.run(
             dof_states=joint_states_converted, body_states=body_state, commands=command
         )
-        torques_converted = SimInterface._convert_torques(torques=torques)
+        torques_converted = SimInterface._convert_torques(torques_control=torques)
 
         if self.logger is not None:
             # make each array print on the next line, with a tab indent
@@ -52,12 +52,47 @@ class SimInterface(interface.RobotInterface):
 
     @staticmethod
     def _convert_joint_states(
-        joint_states: NDArray[Shape["4, 3, 2"], Float32],
+        joint_states_interface: NDArray[Shape["4, 3, 2"], Float32],
     ) -> NDArray[Shape["12, 2"], Float32]:
-        return joint_states.reshape((12, 2))
+        """_summary_
+
+        Args:
+            joint_states_interface (np.ndarray): (4, 3, 2) joint states in interface order
+                index 0: leg index (0-3)
+                index 1: joint index (0-2) (hip, upper leg, lower leg)
+                index 2: state (0: position, 1: velocity)
+
+        Returns:
+            joint_states_control (np.ndarray): (12, 2) joint states in control order
+                [
+                    [FL_hip_pos, FL_hip_vel]
+                    [FL_knee_pos, FL_knee_vel]
+                    [FL_ankle_pos, FL_ankle_vel]
+                    [FR_hip_pos, FR_hip_vel]
+                    ...
+                ]
+        """
+        return joint_states_interface.reshape((12, 2))
 
     @staticmethod
     def _convert_torques(
-        torques: NDArray[Shape["12"], Float32],
+        torques_control: NDArray[Shape["12"], Float32],
     ) -> NDArray[Shape["4, 3"], Float32]:
-        return torques.reshape((4, 3))
+        """_summary_
+
+        Args:
+            torques_control (np.ndarray): (12,) torques in control order
+                [
+                    FL_hip_torque
+                    FL_knee_torque
+                    FL_ankle_torque
+                    FR_hip_torque
+                    ...
+                ]
+
+        Returns:
+            torques_interface (np.ndarray): (4, 3) torques in interface order
+                index 0: leg index (0-3)
+                index 1: joint index (0-2) (hip, upper leg, lower leg)
+        """
+        return torques_control.reshape((4, 3))

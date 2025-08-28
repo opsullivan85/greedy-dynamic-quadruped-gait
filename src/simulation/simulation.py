@@ -129,7 +129,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 scene["robot"].data.default_joint_pos.clone(),
                 scene["robot"].data.default_joint_vel.clone(),
             )
-            joint_pos += torch.rand_like(joint_pos) * 0.1
+            # joint_pos += torch.rand_like(joint_pos) * 0.1
             scene["robot"].write_joint_state_to_sim(joint_pos, joint_vel)
             # clear internal buffers
             scene.reset()
@@ -157,6 +157,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         torques_isaac = torch.from_numpy(torques_isaac_np).to(scene.device)
 
         scene["robot"].set_joint_effort_target(torques_isaac)
+
+        if sim_time > 0 and count == 0:
+            exit(0)
 
 
         # -- write data to sim
