@@ -30,6 +30,7 @@ class RobotInterface(ABC):
                 orientation (xyzw quaternion) = [3:7]
                 velocity = [7:10]
                 angular velocity = [10:13]
+                # TODO: what frames are each of these things in?
             command (np.ndarray): (3,) array of command:
                 x velocity = [0]
                 y velocity = [1]

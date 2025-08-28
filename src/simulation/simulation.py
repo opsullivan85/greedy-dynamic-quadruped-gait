@@ -50,6 +50,7 @@ import numpy as np
 
 import src.robotinterface.siminterface as SimInterface
 from src.robotinterface.interface import RobotInterfaceVect
+from src.simulation.util import isaac_joints_to_interface, isaac_body_to_interface, interface_to_isaac_torques
 import logging
 logger = logging.getLogger(__name__)
 
@@ -140,33 +141,22 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
         joint_pos = scene["robot"].data.joint_pos.cpu().numpy()
         joint_vel = scene["robot"].data.joint_vel.cpu().numpy()
-        joint_pos_vel = np.stack([joint_pos, joint_vel], axis=-1)  # shape (:, 12, 2)
-        # order F makes the indices correspond to the expected format for the interface
-        joint_states = joint_pos_vel.reshape(-1, 4, 3, 2, order="F")
+        joint_states = isaac_joints_to_interface(joint_pos, joint_vel)
 
-        body_pos = scene["robot"].data.root_pos_w.cpu().numpy()
-        body_quat = scene["robot"].data.root_quat_w.cpu().numpy()
-        # re-order body quat from wxyz to xyzw
-        body_quat = np.concatenate([body_quat[..., 3:4], body_quat[..., :3]], axis=-1)
-        # this is both linear and angular velocity
-        body_vel = scene["robot"].data.root_vel_w.cpu().numpy()
-        body_state = np.concatenate([body_pos, body_quat, body_vel], axis=-1)  # shape (:, 13)
-
-        # logger.critical(scene["robot"].data.joint_names)
-        # exit(0)
+        body_state = scene["robot"].data.root_state_w.cpu().numpy()
+        body_state = isaac_body_to_interface(body_state)
 
         command = np.zeros((args_cli.num_envs, 3), dtype=np.float32)
 
-        torques = control_interface.get_torques(
+        torques_interface = control_interface.get_torques(
             joint_states=joint_states,
             body_states=body_state,
             commands=command,
         )
-        # order F makes the indices correspond to the expected format for the simulator
-        torques = torques.reshape((-1, 12), order="F")
-        torques = torch.from_numpy(torques).to(scene.device)
+        torques_isaac_np = interface_to_isaac_torques(torques_interface)
+        torques_isaac = torch.from_numpy(torques_isaac_np).to(scene.device)
 
-        scene["robot"].set_joint_effort_target(torques)
+        scene["robot"].set_joint_effort_target(torques_isaac)
 
 
         # -- write data to sim
