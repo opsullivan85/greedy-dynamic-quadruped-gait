@@ -47,6 +47,7 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # type: ignore
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
 import numpy as np
+import copy
 
 import src.robotinterface.siminterface as SimInterface
 from src.robotinterface.interface import RobotInterfaceVect
@@ -58,6 +59,19 @@ logger = logging.getLogger(__name__)
 # Pre-defined configs
 ##
 from isaaclab_assets.robots.unitree import UNITREE_GO1_CFG as ROBOT_CFG  # type: ignore
+from isaaclab.actuators import DCMotorCfg # type: ignore
+
+
+# override the default ActuatorNetMLPCfg motors so we can usetorque control
+ROBOT_CFG_TORQUE = copy.deepcopy(ROBOT_CFG)
+ROBOT_CFG_TORQUE.actuators['base_legs'] = DCMotorCfg(
+        joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
+        effort_limit=23.7,
+        saturation_effort=23.7,
+        velocity_limit=30.0,
+        stiffness=0.0,
+        damping=0.0,
+)
 
 
 @configclass
@@ -77,7 +91,8 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     )
 
     # robot
-    robot: ArticulationCfg = ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot: ArticulationCfg = ROBOT_CFG_TORQUE.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
 
     # sensors
     height_scanner = RayCasterCfg(
@@ -151,10 +166,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         torques_isaac_np = interface_to_isaac_torques(torques_interface)
         torques_isaac = torch.from_numpy(torques_isaac_np).to(scene.device)
 
-        # scene["robot"].set_joint_effort_target(torques_isaac)\
-        fake_torques = np.asarray([[20.0,]*12,]*args_cli.num_envs)
-        fake_torques = torch.from_numpy(fake_torques).to(scene.device)
-        scene["robot"].set_joint_effort_target(fake_torques)
+        scene["robot"].set_joint_effort_target(torques_isaac)
+        # fake_torques = np.asarray([[20.0,]*12,]*args_cli.num_envs)
+        # fake_torques = torch.from_numpy(fake_torques).to(scene.device)
+        # scene["robot"].set_joint_effort_target(fake_torques)
 
         # -- write data to sim
         scene.write_data_to_sim()
