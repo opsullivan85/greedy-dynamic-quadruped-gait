@@ -1,4 +1,4 @@
-from src.control import RobotRunnerMin, RobotType
+from src.control import RobotRunnerMin, RobotType, RobotRunnerFSM
 from src.robotinterface import interface
 from nptyping import NDArray, Float32, Shape
 import numpy as np
@@ -12,7 +12,7 @@ class SimInterface(interface.RobotInterface):
         if debug_logging:
             self.logger = logger
 
-        self.robot_runner = RobotRunnerMin()
+        self.robot_runner = RobotRunnerFSM()
         self.robot_runner.init(RobotType.GO1, dt)
 
     def get_torques(

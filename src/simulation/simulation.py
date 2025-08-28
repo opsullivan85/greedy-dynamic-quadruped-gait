@@ -27,7 +27,7 @@ from isaaclab.app import AppLauncher  # type: ignore
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a robot.")
-parser.add_argument("--num_envs", type=int, default=2, help="Number of environments to spawn.")
+parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -133,11 +133,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             scene["robot"].write_joint_state_to_sim(joint_pos, joint_vel)
             # clear internal buffers
             scene.reset()
-        # Apply default actions to the robot
-        # -- generate actions/commands
-        # targets = scene["robot"].data.default_joint_pos
-        # -- apply action to the robot
-        # scene["robot"].set_joint_position_target(targets)
 
         joint_pos = scene["robot"].data.joint_pos.cpu().numpy()
         joint_vel = scene["robot"].data.joint_vel.cpu().numpy()
@@ -156,11 +151,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         torques_isaac_np = interface_to_isaac_torques(torques_interface)
         torques_isaac = torch.from_numpy(torques_isaac_np).to(scene.device)
 
-        scene["robot"].set_joint_effort_target(torques_isaac)
-
-        if sim_time > 0 and count == 0:
-            exit(0)
-
+        # scene["robot"].set_joint_effort_target(torques_isaac)\
+        fake_torques = np.asarray([[20.0,]*12,]*args_cli.num_envs)
+        fake_torques = torch.from_numpy(fake_torques).to(scene.device)
+        scene["robot"].set_joint_effort_target(fake_torques)
 
         # -- write data to sim
         scene.write_data_to_sim()
@@ -171,14 +165,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         count += 1
         # update buffers
         scene.update(sim_dt)
-
-        # print information from the sensors
-        # print("-------------------------------")
-        # print(scene["height_scanner"])
-        # print("Received max height value: ", torch.max(scene["height_scanner"].data.ray_hits_w[..., -1]).item())
-        # print("-------------------------------")
-        # print(scene["contact_forces"])
-        # print("Received max contact force of: ", torch.max(scene["contact_forces"].data.net_forces_w).item())
 
 
 def main():
