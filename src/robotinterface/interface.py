@@ -47,6 +47,15 @@ class RobotInterface(ABC):
 T = TypeVar('T', bound=RobotInterface)
 
 class RobotInterfaceVect(Generic[T]):
+    """Provides a vectorized wrapper around a RobotInterface
+
+    The RobotInterface does not work with vectorized data (ie many robot states at once).
+    This class provides a wrapper around a RobotInterface, letting it accept data from multiple
+    robots at once. The data is then processed in parallel on the CPU.
+
+    Args:
+        Generic (RobotInterface): The class being vectorized
+    """
     def __init__(self, dt: float, instances: int, cls: Type[T], **kwargs) -> None:
         self.instances = instances
         self.interfaces: list[T] = [
