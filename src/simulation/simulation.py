@@ -113,7 +113,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     """Run the simulator."""
     control_interface = RobotInterfaceVect(dt=sim.get_physics_dt(), instances=args_cli.num_envs, cls=SimInterface.SimInterface, debug_logging=False)
     # make the first one log
-    control_interface.interfaces[0].logger = SimInterface.logger
+    # control_interface.interfaces[0].logger = SimInterface.logger
 
     sim_dt = sim.get_physics_dt()
     logger.debug(f"dt: {sim_dt}")
@@ -126,8 +126,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         if count % 500 == 0:
             logger.info("resetting the simulation")
 
-            for interface in control_interface.interfaces:
-                interface.reset()
+            # for interface in control_interface.interfaces:
+            #     interface.reset()
 
             # reset counter
             count = 0
