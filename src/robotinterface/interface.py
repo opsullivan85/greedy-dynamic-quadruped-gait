@@ -2,11 +2,14 @@ from abc import ABC, abstractmethod
 from nptyping import NDArray, Float32, Shape
 from typing import Any, Type, Generic, TypeVar
 import numpy as np
-from multiprocessing import Process, Pipe
+from multiprocessing import Process, Pipe, cpu_count
 from multiprocessing.connection import Connection
 from concurrent.futures import ThreadPoolExecutor
 import traceback
 import enum
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class RobotInterface(ABC):
@@ -69,61 +72,100 @@ T = TypeVar("T", bound=RobotInterface)
 class RobotInterfaceVect(Generic[T]):
     """Provides a vectorized wrapper around a RobotInterface using multiprocessing.
 
-    Each RobotInterface instance runs in its own dedicated process to handle CPU-bound
+    Robot interfaces are distributed across worker processes to handle CPU-bound
     computations in parallel while maintaining state persistence across calls.
 
-    Args:
-        dt: Time step for robot interfaces
-        instances: Number of robot interface instances to create
-        cls: The RobotInterface class to instantiate
-        **kwargs: Additional arguments passed to RobotInterface constructor
     """
 
-    def __init__(self, dt: float, instances: int, cls: Type[T], **kwargs) -> None:
+    def __init__(
+        self,
+        dt: float,
+        instances: int,
+        cls: Type[T],
+        num_workers: None | int = None,
+        **kwargs,
+    ) -> None:
+        """
+
+        Args:
+            dt: Time step for robot interfaces
+            instances: Number of robot interface instances to create
+            cls: The RobotInterface class to instantiate
+            num_workers: Number of worker processes (default: cpu_count())
+                automatically set to the number of instances if that is lower
+                than the desired number of workers
+            **kwargs: Additional arguments passed to RobotInterface constructor
+        """
         self.instances = instances
-        self.cls = cls
-        self.dt = dt
-        self.kwargs = kwargs
+        self.num_workers = min(num_workers or cpu_count(), instances)
 
         self.workers: list[Process] = []
         self.pipes: list[Connection] = []
 
+        # Setup workers
+        self._setup_workers(dt, cls, **kwargs)
 
-        # Verify all workers started successfully
-        self._setup_workers(dt, instances, cls, **kwargs)
+    def _batch_data(self, data: np.ndarray) -> list[np.ndarray]:
+        """Batches data to be sent to the workers"""
+        return np.array_split(data, self.num_workers)
 
-    def _setup_workers(self, dt, instances: int, cls: Type[T], **kwargs) -> None:
-        """Verify all worker processes initialized successfully."""
-        for i in range(instances):
+    def _setup_workers(self, dt: float, cls: Type[T], **kwargs) -> None:
+        """Setup worker processes and verify they initialized successfully."""
+        robot_assignments = self._batch_data(np.arange(self.instances))
+        # figure out how many robots each worker has
+        worker_robots = [assignment.shape[0] for assignment in robot_assignments]
+
+        for worker_id, num_robots in zip(range(self.num_workers), worker_robots):
             parent_conn, child_conn = Pipe()
+
             worker = Process(
-                target=self._worker_loop, args=(child_conn, i, cls, dt, kwargs)
+                target=self._worker_loop,
+                args=(child_conn, worker_id, cls, dt, num_robots, kwargs),
             )
             worker.start()
 
             self.workers.append(worker)
             self.pipes.append(parent_conn)
 
+        # Verify all workers started successfully
+        for pipe in self.pipes:
+            try:
+                pipe.send((Message.Manager.PING, None))
+                response_type, result = pipe.recv()
+                if response_type != Message.Worker.PONG:
+                    raise RuntimeError(f"Worker failed to initialize: {result}")
+            except Exception as e:
+                self._cleanup()
+                raise RuntimeError(f"Failed to verify worker readiness: {e}")
+
+    def _verify_workers_ready(self) -> None:
+        """Verify all worker processes initialized successfully."""
         for pipe in self.pipes:
             try:
                 # Send initialization check
                 pipe.send((Message.Manager.PING, None))
                 response_type, result = pipe.recv()
                 if response_type != Message.Worker.PONG:
-                    raise RuntimeError(
-                        f"Worker failed to initialize: {result}"
-                    )
+                    raise RuntimeError(f"Worker failed to initialize: {result}")
             except Exception as e:
                 self._cleanup()
                 raise RuntimeError(f"Failed to verify worker readiness: {e}")
 
     @staticmethod
     def _worker_loop(
-        conn: Connection, worker_id: int, cls: Type[T], dt: float, kwargs: dict
+        conn: Connection,
+        worker_id: int,
+        cls: Type[T],
+        dt: float,
+        num_robots: int,
+        kwargs: dict,
     ) -> None:
-        """Main loop for worker process. Creates and maintains a RobotInterface instance."""
+        """Main loop for worker process. Creates and maintains multiple RobotInterface instances."""
         try:
-            interface = cls(dt=dt, **kwargs)
+            # Initialize all robot interfaces for this worker
+            interfaces = [cls(dt=dt, **kwargs) for _ in range(num_robots)]
+
+            logger.debug(f"started worker id {worker_id} with {num_robots} robots")
 
             # Main processing loop
             while True:
@@ -133,18 +175,28 @@ class RobotInterfaceVect(Generic[T]):
                     if command == Message.Manager.PING:
                         conn.send((Message.Worker.PONG, None))
                     elif command == Message.Manager.GET_TORQUES:
-                        joint_states, body_state, command_input = data
-                        torques = interface.get_torques(
-                            joint_states=joint_states,
-                            body_state=body_state,
-                            command=command_input,
-                        )
-                        conn.send((Message.Worker.SUCCESS, torques))
+                        batch_joint_states, batch_body_states, batch_commands = data
+
+                        # Process each robot in this worker's batch
+                        torques_list = []
+                        for i in range(len(interfaces)):
+                            torques = interfaces[i].get_torques(
+                                joint_states=batch_joint_states[i],
+                                body_state=batch_body_states[i],
+                                command=batch_commands[i],
+                            )
+                            torques_list.append(torques)
+
+                        # Stack results for this worker's batch
+                        batch_torques = np.stack(torques_list, axis=0)
+                        conn.send((Message.Worker.SUCCESS, batch_torques))
                     elif command == Message.Manager.SHUTDOWN:
                         conn.send((Message.Worker.SUCCESS, None))
                         break
                     else:
-                        conn.send((Message.Worker.EXCEPTION, f"Unknown command: {command}"))
+                        conn.send(
+                            (Message.Worker.EXCEPTION, f"Unknown command: {command}")
+                        )
 
                 except Exception as e:
                     # Send error back to main process
@@ -212,26 +264,25 @@ class RobotInterfaceVect(Generic[T]):
             commands.shape[0] == self.instances
         ), f"Expected {self.instances} instances, got {commands.shape[0]}"
 
-        # Send computation requests to all workers
-        for i in range(self.instances):
+        batched_joint_states = self._batch_data(joint_states)
+        batched_body_states = self._batch_data(body_states)
+        batched_commands = self._batch_data(commands)
+
+        for pipe, batched_args in zip(
+            self.pipes, zip(batched_joint_states, batched_body_states, batched_commands)
+        ):
             try:
-                self.pipes[i].send(
-                    (
-                        Message.Manager.GET_TORQUES,
-                        (joint_states[i], body_states[i], commands[i]),
-                    )
-                )
+                pipe.send((Message.Manager.GET_TORQUES, batched_args))
             except Exception as e:
-                self._cleanup()
+                self._cleanup
                 raise RuntimeError(f"Failed to send data to worker: {e}")
 
-        # Collect results from all workers
-        torques_list = []
-        for i in range(self.instances):
-            torques = RobotInterfaceVect._expect_success(self.pipes[i])
-            torques_list.append(torques)
+        torques = []
+        for pipe in self.pipes:
+            batched_torques = RobotInterfaceVect._expect_success(pipe)
+            torques.append(batched_torques)
 
-        return np.stack(torques_list, axis=0)
+        return np.concatenate(torques)
 
     def _cleanup(self) -> None:
         """Clean up worker processes and pipes."""
@@ -240,11 +291,12 @@ class RobotInterfaceVect(Generic[T]):
             try:
                 if pipe is not None:
                     pipe.send((Message.Manager.SHUTDOWN, None))
-                    pipe.recv()
+                    pipe.recv()  # Wait for acknowledgment
                     pipe.close()
             except:
-                pass
+                pass  # Worker may already be dead
 
+        # Terminate any remaining worker processes
         for worker in self.workers:
             if worker.is_alive():
                 worker.terminate()
