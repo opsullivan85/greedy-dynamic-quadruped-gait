@@ -244,13 +244,20 @@ class VectSim2Real(Generic[T]):
         else:
             mask = np.full((self.instances,), True, dtype=bool)
 
-        all_batched_args = [self._batch_data(arg) for arg in kwargs.values()]
-        all_batched_mask = self._batch_data(mask)
         function_name = function.__name__
+        all_batched_mask = self._batch_data(mask)
+        all_batched_args = [self._batch_data(arg) for arg in kwargs.values()]
+        if all_batched_args:
+            batched_args_iter = zip(*all_batched_args)
+        else:
+            # need this edge case to keep the outer zip happy
+            # here we just pass an empty tuple which eventually gets
+            # splatted (*...) into nothingness by the workers
+            batched_args_iter = [() for _ in range(len(self.pipes))]  # type: ignore
 
         # send function calls
         for pipe, batched_mask, batched_args in zip(
-            self.pipes, all_batched_mask, zip(*all_batched_args)
+            self.pipes, all_batched_mask, batched_args_iter
         ):
             try:
                 pipe_args = (function_name, batched_mask, batched_args)
