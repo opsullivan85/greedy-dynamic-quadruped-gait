@@ -29,8 +29,7 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # type: ignore
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
 
-import src.sim2real.siminterface as SimInterface
-from src.sim2real import VectSim2Real
+from src.sim2real import VectSim2Real, SimInterface
 from src.simulation.util import (
     interface_to_isaac_torques,
     isaac_body_to_interface,
@@ -99,7 +98,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     control_interface = VectSim2Real(
         dt=sim.get_physics_dt(),
         instances=args_cli.num_envs,
-        cls=SimInterface.SimInterface,
+        cls=SimInterface,
         debug_logging=False,
     )
     # make the first one log
@@ -138,7 +137,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             scene["robot"].write_joint_state_to_sim(joint_pos, joint_vel)
             # clear internal buffers
             scene.reset()
-            control_interface.reset()
+            control_interface.call(
+                function=SimInterface.reset,
+                mask=None,
+            )
 
         joint_pos = scene["robot"].data.joint_pos.cpu().numpy()
         joint_vel = scene["robot"].data.joint_vel.cpu().numpy()
@@ -149,7 +151,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
         command = np.zeros((args_cli.num_envs, 3), dtype=np.float32)
 
-        torques_interface = control_interface.get_torques(
+        torques_interface = control_interface.call(
+            function=SimInterface.get_torques,
+            mask=None,
             joint_states=joint_states,
             body_state=body_state,
             command=command,

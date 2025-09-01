@@ -207,21 +207,23 @@ class VectSim2Real(Generic[T]):
         except Exception as e:
             raise RuntimeError(f"Failed to receive result from worker: {e}")
 
-    def _call_function(
+    def call(
         self,
         function: Callable,
         mask: None | NDArray[Shape["*"], Bool],
         **kwargs: NDArray[Shape["*, ..."], Number],
-    ) -> np.ndarray:
+    ) -> NDArray[Shape["*, ..."], Any]:
         """Calls a function on all of the underlying interfaces
 
         Args:
-            function (Callable): function to call (taken from the Sim2RealInterface)
-            kwargs (np.ndarray): passed into the function. Expected to match function signature
-                except the type will be wrapped in a np.ndarray. kwargs verified at runtime.
+            function (Callable): function to call (should be a handle to a function from T)
+            mask (None | NDArray[Shape["*"], Bool]): mask to apply to the function inputs
+            kwargs (np.ndarray): arguments to pass to function. same type but with dimensionality
+                one higher than the function's input
 
         Returns:
-            np.ndarray: a numpy array of results
+            np.ndarray: a numpy array of results with a dimensionality one higher than the 
+                function return type
         """
         # validate kwargs against the function signature
         sig = inspect.signature(function)
@@ -229,7 +231,7 @@ class VectSim2Real(Generic[T]):
             sig.bind_partial(**kwargs)
         except TypeError as e:
             raise TypeError(
-                f"Invalid arguments for Sim2RealInterface::{function.__name__}: {e}"
+                f"Invalid arguments for {function.__name__}: {e}"
             )
 
         # validate kwarg shapes
@@ -273,30 +275,6 @@ class VectSim2Real(Generic[T]):
             results.append(batched_torques)
 
         return np.concatenate(results)
-
-    def get_torques(
-        self,
-        joint_states: NDArray[Shape["*, 4, 3, 2"], Float32],
-        body_state: NDArray[Shape["*, 13"], Float32],
-        command: NDArray[Shape["*, 3"], Float32],
-        mask: None | NDArray[Shape["*"], Bool] = None,  # type: ignore
-    ) -> NDArray[Shape["*, 4, 3"], Float32]:
-        return self._call_function(
-            function=Sim2RealInterface.get_torques,
-            mask=mask,
-            joint_states=joint_states,
-            body_state=body_state,
-            command=command,
-        )
-
-    def reset(
-        self,
-        mask: None | NDArray[Shape["*"], Bool] = None,
-    ) -> NDArray[Shape["*"], Number]:
-        return self._call_function(
-            function=Sim2RealInterface.reset,
-            mask=mask,
-        )
 
     def _cleanup(self) -> None:
         """Clean up worker processes and pipes."""
