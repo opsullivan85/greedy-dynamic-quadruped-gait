@@ -10,7 +10,7 @@ def main():
     print("Hello, RobotInterface!")
     import numpy as np
 
-    from src.sim2real.siminterface import SimInterface
+    from src.sim2real import SimInterface
 
     sim_interface = SimInterface(dt=0.01, debug_logging=True)
 

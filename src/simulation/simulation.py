@@ -30,7 +30,7 @@ from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: i
 from isaaclab.utils import configclass  # type: ignore
 
 import src.sim2real.siminterface as SimInterface
-from src.sim2real.vectinterface import RobotInterfaceVect
+from src.sim2real import VectSim2Real
 from src.simulation.util import (
     interface_to_isaac_torques,
     isaac_body_to_interface,
@@ -96,7 +96,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
 
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     """Run the simulator."""
-    control_interface = RobotInterfaceVect(
+    control_interface = VectSim2Real(
         dt=sim.get_physics_dt(),
         instances=args_cli.num_envs,
         cls=SimInterface.SimInterface,

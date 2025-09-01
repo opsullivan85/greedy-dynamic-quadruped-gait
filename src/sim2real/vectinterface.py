@@ -1,3 +1,4 @@
+import enum
 import logging
 import traceback
 from multiprocessing import Pipe, Process, cpu_count
@@ -7,15 +8,31 @@ from typing import Any, Generic, Type, TypeVar
 import numpy as np
 from nptyping import Float32, NDArray, Shape
 
-from src.sim2real.abstractinterface import RobotInterface
+from src.sim2real import Sim2RealInterface
 
 logger = logging.getLogger(__name__)
 
 
-T = TypeVar("T", bound=RobotInterface)
+class Message:
+    class _ManagerMessages(enum.Enum):
+        PING = enum.auto()
+        GET_TORQUES = enum.auto()
+        SHUTDOWN = enum.auto()
+        RESET = enum.auto()
+
+    class _WorkerMessages(enum.Enum):
+        PONG = enum.auto()
+        SUCCESS = enum.auto()
+        EXCEPTION = enum.auto()
+
+    Manager = _ManagerMessages
+    Worker = _WorkerMessages
 
 
-class RobotInterfaceVect(Generic[T]):
+T = TypeVar("T", bound=Sim2RealInterface)
+
+
+class VectSim2Real(Generic[T]):
     """Provides a vectorized wrapper around a RobotInterface using multiprocessing.
 
     Robot interfaces are distributed across worker processes to handle CPU-bound
@@ -225,7 +242,7 @@ class RobotInterfaceVect(Generic[T]):
 
         torques = []
         for pipe in self.pipes:
-            batched_torques = RobotInterfaceVect._expect_success(pipe)
+            batched_torques = VectSim2Real._expect_success(pipe)
             torques.append(batched_torques)
 
         return np.concatenate(torques)

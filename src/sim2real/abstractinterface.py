@@ -7,7 +7,7 @@ from nptyping import Float32, NDArray, Shape
 logger = logging.getLogger(__name__)
 
 
-class RobotInterface(ABC):
+class Sim2RealInterface(ABC):
     @abstractmethod
     def __init__(self, dt: float) -> None:
         pass

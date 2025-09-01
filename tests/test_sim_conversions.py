@@ -5,10 +5,11 @@ module_path = Path(__file__).parent.parent
 sys.path.append(str(module_path))
 
 import numpy as np
+
 from src.simulation.util import (
-    isaac_joints_to_interface,
-    isaac_body_to_interface,
     interface_to_isaac_torques,
+    isaac_body_to_interface,
+    isaac_joints_to_interface,
 )
 
 isaac_joints = [

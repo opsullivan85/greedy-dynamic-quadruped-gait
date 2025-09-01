@@ -4,12 +4,12 @@ import numpy as np
 from nptyping import Float32, NDArray, Shape
 
 from src.control import RobotRunnerFSM, RobotType
-from src.sim2real import abstractinterface
+from src.sim2real import Sim2RealInterface
 
 logger = logging.getLogger(__name__)
 
 
-class SimInterface(abstractinterface.RobotInterface):
+class SimInterface(Sim2RealInterface):
     def __init__(self, dt: float, debug_logging: bool = False) -> None:
         self.logger: None | logging.Logger = None
         if debug_logging:
