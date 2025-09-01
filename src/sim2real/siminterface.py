@@ -4,7 +4,7 @@ import numpy as np
 from nptyping import Float32, NDArray, Shape
 
 from src.control import RobotRunnerFSM, RobotType
-from src.sim2real import Sim2RealInterface
+from src.sim2real.abstractinterface import Sim2RealInterface
 
 logger = logging.getLogger(__name__)
 

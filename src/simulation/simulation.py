@@ -138,6 +138,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             scene["robot"].write_joint_state_to_sim(joint_pos, joint_vel)
             # clear internal buffers
             scene.reset()
+            control_interface.reset()
 
         joint_pos = scene["robot"].data.joint_pos.cpu().numpy()
         joint_vel = scene["robot"].data.joint_vel.cpu().numpy()
@@ -150,8 +151,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
         torques_interface = control_interface.get_torques(
             joint_states=joint_states,
-            body_states=body_state,
-            commands=command,
+            body_state=body_state,
+            command=command,
         )
         torques_isaac_np = interface_to_isaac_torques(torques_interface)
         torques_isaac = torch.from_numpy(torques_isaac_np).to(scene.device)

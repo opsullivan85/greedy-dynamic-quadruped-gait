@@ -1,7 +1,7 @@
-import enum
 import logging
 from abc import ABC, abstractmethod
 
+import numpy as np
 from nptyping import Float32, NDArray, Shape
 
 logger = logging.getLogger(__name__)
@@ -44,18 +44,8 @@ class Sim2RealInterface(ABC):
         """
         pass
 
-
-class Message:
-    class _ManagerMessages(enum.Enum):
-        PING = enum.auto()
-        GET_TORQUES = enum.auto()
-        SHUTDOWN = enum.auto()
-        RESET = enum.auto()
-
-    class _WorkerMessages(enum.Enum):
-        PONG = enum.auto()
-        SUCCESS = enum.auto()
-        EXCEPTION = enum.auto()
-
-    Manager = _ManagerMessages
-    Worker = _WorkerMessages
+    @abstractmethod
+    def reset(self) -> None:
+        """Resets the robot
+        """
+        pass

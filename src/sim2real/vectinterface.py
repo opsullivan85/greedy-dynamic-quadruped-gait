@@ -1,14 +1,16 @@
-import enum
+import inspect
 import logging
 import traceback
 from multiprocessing import Pipe, Process, cpu_count
 from multiprocessing.connection import Connection
-from typing import Any, Generic, Type, TypeVar
+from typing import Any, Callable, Generic, Type, TypeVar
 
 import numpy as np
-from nptyping import Float32, NDArray, Shape
+from nptyping import Float32, NDArray, Shape, Bool, Number
 
-from src.sim2real import Sim2RealInterface
+from src.sim2real.abstractinterface import Sim2RealInterface
+
+import enum
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +18,8 @@ logger = logging.getLogger(__name__)
 class Message:
     class _ManagerMessages(enum.Enum):
         PING = enum.auto()
-        GET_TORQUES = enum.auto()
+        CALL_FUNCTION = enum.auto()
         SHUTDOWN = enum.auto()
-        RESET = enum.auto()
 
     class _WorkerMessages(enum.Enum):
         PONG = enum.auto()
@@ -38,6 +39,8 @@ class VectSim2Real(Generic[T]):
     Robot interfaces are distributed across worker processes to handle CPU-bound
     computations in parallel while maintaining state persistence across calls.
 
+    Function signatures are almost exactly the same as those from Sim2RealInterface.
+    just look there for documentation
     """
 
     def __init__(
@@ -137,25 +140,29 @@ class VectSim2Real(Generic[T]):
 
                     if command == Message.Manager.PING:
                         conn.send((Message.Worker.PONG, None))
-                    elif command == Message.Manager.GET_TORQUES:
-                        batch_joint_states, batch_body_states, batch_commands = data
+
+                    elif command == Message.Manager.CALL_FUNCTION:
+                        function_name, mask, batch_args = data
 
                         # Process each robot in this worker's batch
-                        torques_list = []
+                        results_list = []
                         for i in range(len(interfaces)):
-                            torques = interfaces[i].get_torques(
-                                joint_states=batch_joint_states[i],
-                                body_state=batch_body_states[i],
-                                command=batch_commands[i],
-                            )
-                            torques_list.append(torques)
+                            if not mask[i]:
+                                # nan here still allows the output array to be typed
+                                results_list.append(np.nan)
+                            function = getattr(interfaces[i], function_name)
+                            args = [batch_arg[i] for batch_arg in batch_args]
+                            result = function(*args)
+                            results_list.append(result)
 
                         # Stack results for this worker's batch
-                        batch_torques = np.stack(torques_list, axis=0)
-                        conn.send((Message.Worker.SUCCESS, batch_torques))
+                        batch_results = np.stack(results_list, axis=0)
+                        conn.send((Message.Worker.SUCCESS, batch_results))
+
                     elif command == Message.Manager.SHUTDOWN:
                         conn.send((Message.Worker.SUCCESS, None))
                         break
+
                     else:
                         conn.send(
                             (Message.Worker.EXCEPTION, f"Unknown command: {command}")
@@ -200,52 +207,89 @@ class VectSim2Real(Generic[T]):
         except Exception as e:
             raise RuntimeError(f"Failed to receive result from worker: {e}")
 
-    def get_torques(
+    def _call_function(
         self,
-        joint_states: NDArray[Shape["N, 4, 3, 2"], Float32],
-        body_states: NDArray[Shape["N, 13"], Float32],
-        commands: NDArray[Shape["N, 3"], Float32],
-    ) -> NDArray[Shape["N, 4, 3"], Float32]:
-        """Compute and return the joint torques for multiple instances based on the current states and commands.
+        function: Callable,
+        mask: None | NDArray[Shape["*"], Bool],
+        **kwargs: NDArray[Shape["*, ..."], Number],
+    ) -> np.ndarray:
+        """Calls a function on all of the underlying interfaces
 
         Args:
-            joint_states: (N,4,3,2) array of joint states for N instances
-            body_states: (N,13) array of body states for N instances
-            commands: (N,3) array of commands for N instances
+            function (Callable): function to call (taken from the Sim2RealInterface)
+            kwargs (np.ndarray): passed into the function. Expected to match function signature
+                except the type will be wrapped in a np.ndarray. kwargs verified at runtime.
 
         Returns:
-            (N,4,3) array of joint torques for N instances
+            np.ndarray: a numpy array of results
         """
-        # Validate input dimensions
-        assert (
-            joint_states.shape[0] == self.instances
-        ), f"Expected {self.instances} instances, got {joint_states.shape[0]}"
-        assert (
-            body_states.shape[0] == self.instances
-        ), f"Expected {self.instances} instances, got {body_states.shape[0]}"
-        assert (
-            commands.shape[0] == self.instances
-        ), f"Expected {self.instances} instances, got {commands.shape[0]}"
+        # validate kwargs against the function signature
+        sig = inspect.signature(function)
+        try:
+            sig.bind_partial(**kwargs)
+        except TypeError as e:
+            raise TypeError(
+                f"Invalid arguments for Sim2RealInterface::{function.__name__}: {e}"
+            )
 
-        batched_joint_states = self._batch_data(joint_states)
-        batched_body_states = self._batch_data(body_states)
-        batched_commands = self._batch_data(commands)
+        # validate kwarg shapes
+        for kw, arg in kwargs.items():
+            assert (
+                arg.shape[0] == self.instances
+            ), f"Expected {self.instances} rows for {kw}, got {arg.shape[0]}"
+        if mask is not None:
+            assert (
+                mask.shape[0] == self.instances
+            ), f"Expected {self.instances} rows for mask, got {mask.shape[0]}"
+        else:
+            mask = np.full((self.instances,), True, dtype=bool)
 
-        for pipe, batched_args in zip(
-            self.pipes, zip(batched_joint_states, batched_body_states, batched_commands)
+        all_batched_args = [self._batch_data(arg) for arg in kwargs.values()]
+        all_batched_mask = self._batch_data(mask)
+        function_name = function.__name__
+
+        # send function calls
+        for pipe, batched_mask, batched_args in zip(
+            self.pipes, all_batched_mask, zip(*all_batched_args)
         ):
             try:
-                pipe.send((Message.Manager.GET_TORQUES, batched_args))
+                pipe_args = (function_name, batched_mask, batched_args)
+                pipe.send((Message.Manager.CALL_FUNCTION, pipe_args))
             except Exception as e:
-                self._cleanup
+                self._cleanup()
                 raise RuntimeError(f"Failed to send data to worker: {e}")
 
-        torques = []
+        # gather results
+        results = []
         for pipe in self.pipes:
             batched_torques = VectSim2Real._expect_success(pipe)
-            torques.append(batched_torques)
+            results.append(batched_torques)
 
-        return np.concatenate(torques)
+        return np.concatenate(results)
+
+    def get_torques(
+        self,
+        joint_states: NDArray[Shape["*, 4, 3, 2"], Float32],
+        body_state: NDArray[Shape["*, 13"], Float32],
+        command: NDArray[Shape["*, 3"], Float32],
+        mask: None | NDArray[Shape["*"], Bool] = None,  # type: ignore
+    ) -> NDArray[Shape["*, 4, 3"], Float32]:
+        return self._call_function(
+            function=Sim2RealInterface.get_torques,
+            mask=mask,
+            joint_states=joint_states,
+            body_state=body_state,
+            command=command,
+        )
+
+    def reset(
+        self,
+        mask: None | NDArray[Shape["*"], Bool] = None,
+    ) -> NDArray[Shape["*"], Number]:
+        return self._call_function(
+            function=Sim2RealInterface.reset,
+            mask=mask,
+        )
 
     def _cleanup(self) -> None:
         """Clean up worker processes and pipes."""
