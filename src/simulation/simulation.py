@@ -28,6 +28,8 @@ from isaaclab.assets import ArticulationCfg, AssetBaseCfg  # type: ignore
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # type: ignore
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
+from isaaclab.terrains import TerrainImporterCfg, TerrainGeneratorCfg  # type: ignore
+from isaaclab.terrains.height_field import hf_terrains_cfg  # type: ignore
 
 from src.sim2real import VectSim2Real, SimInterface
 from src.simulation.util import (
@@ -53,18 +55,41 @@ ROBOT_CFG_TORQUE.actuators["base_legs"] = DCMotorCfg(
 )
 
 
+# @configclass
+# class Terrain(hf_terrains_cfg.HfSteppingStonesTerrainCfg):
+#     def __post_init__(self):
+
+
+
 @configclass
 class SensorsSceneCfg(InteractiveSceneCfg):
     """Design the scene with sensors on the robot."""
 
-    # ground plane
-    # friction to simulate rubber on concrete
-    ground = sim_utils.GroundPlaneCfg(
+    # Replace ground plane with stepping stones terrain
+    ground = TerrainImporterCfg(
+        prim_path="/World/defaultGroundPlane",
+        terrain_type="generator",
+        # https://isaac-sim.github.io/IsaacLab/v2.1.0/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg
+        terrain_generator=TerrainGeneratorCfg(
+            size=(10,10),
+            difficulty_range=(0.5, 1.0),
+            horizontal_scale = 0.01,
+            vertical_scale = 0.5,
+            # color_scheme="height",
+
+            # https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.height_field.hf_terrains_cfg.HfSteppingStonesTerrainCfg
+            sub_terrains={"stepping_stones": hf_terrains_cfg.HfSteppingStonesTerrainCfg(
+                stone_height_max = 0.9,
+                stone_width_range = (0.05, 0.1),
+                stone_distance_range = (0.0, 0.3),
+                # holes_depth = -0.5,
+            )},
+        ),
         physics_material=sim_utils.RigidBodyMaterialCfg(
-            static_friction=0.8, dynamic_friction=0.8
+            static_friction=0.8,
+            dynamic_friction=0.8,
         ),
     )
-    ground = AssetBaseCfg(prim_path="/World/defaultGroundPlane", spawn=ground)
 
     # lights
     dome_light = AssetBaseCfg(
