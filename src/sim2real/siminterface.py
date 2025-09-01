@@ -1,12 +1,15 @@
-from src.control import RobotRunnerMin, RobotType, RobotRunnerFSM
-from src.robotinterface import interface
-from nptyping import NDArray, Float32, Shape
-import numpy as np
 import logging
+
+import numpy as np
+from nptyping import Float32, NDArray, Shape
+
+from src.control import RobotRunnerFSM, RobotType
+from src.sim2real import abstractinterface
+
 logger = logging.getLogger(__name__)
 
 
-class SimInterface(interface.RobotInterface):
+class SimInterface(abstractinterface.RobotInterface):
     def __init__(self, dt: float, debug_logging: bool = False) -> None:
         self.logger: None | logging.Logger = None
         if debug_logging:
@@ -33,7 +36,9 @@ class SimInterface(interface.RobotInterface):
             # make each array print on the next line, with a tab indent
             formatter = "\n\t\t"
             with np.printoptions(precision=5, suppress=True):
-                joint_states_str = formatter + formatter.join(str(joint_states).split("\n"))
+                joint_states_str = formatter + formatter.join(
+                    str(joint_states).split("\n")
+                )
                 body_state_str = formatter + formatter.join(str(body_state).split("\n"))
                 command_str = formatter + formatter.join(str(command).split("\n"))
                 torques_str = formatter + formatter.join(str(torques).split("\n"))

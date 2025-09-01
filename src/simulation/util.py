@@ -48,12 +48,15 @@ def isaac_body_to_interface(body_state_isaac: np.ndarray) -> np.ndarray:
         ]
     """
     # move quatw to end and shift xyz to left
-    body_states_interface = np.concatenate([
-        body_state_isaac[:, :3],          # pos_x, pos_y, pos_z
-        body_state_isaac[:, 4:7],         # quat_x, quat_y, quat_z
-        body_state_isaac[:, 3:4],         # quat_w
-        body_state_isaac[:, 7:]           # rest
-    ], axis=1)
+    body_states_interface = np.concatenate(
+        [
+            body_state_isaac[:, :3],  # pos_x, pos_y, pos_z
+            body_state_isaac[:, 4:7],  # quat_x, quat_y, quat_z
+            body_state_isaac[:, 3:4],  # quat_w
+            body_state_isaac[:, 7:],  # rest
+        ],
+        axis=1,
+    )
 
     return body_states_interface
 

@@ -4,18 +4,18 @@ from pathlib import Path
 module_path = Path(__file__).parent.parent
 sys.path.append(str(module_path))
 
-import numpy as np
 from types import SimpleNamespace
-from nptyping import NDArray, Float32, Shape
 
-import src.robotinterface.siminterface as SimInterface
-from src.robotinterface.interface import RobotInterfaceVect
+import numpy as np
+from nptyping import Float32, NDArray, Shape
+
+import src.sim2real.siminterface as SimInterface
+from src.sim2real.vectinterface import RobotInterfaceVect
 from src.simulation.util import (
     interface_to_isaac_torques,
     isaac_body_to_interface,
     isaac_joints_to_interface,
 )
-
 
 isaac_joints = [
     "FL_hip",
@@ -138,19 +138,13 @@ def test_mock_sim():
 
     #### MOCK DATA
     # joint_pos = scene["robot"].data.joint_pos.cpu().numpy()
-    joint_pos = [
-        np.char.add(isaac_joints, "_pos") for i in range(args_cli.num_envs)
-    ]
+    joint_pos = [np.char.add(isaac_joints, "_pos") for i in range(args_cli.num_envs)]
     joint_pos = np.asarray(joint_pos)
     # joint_vel = scene["robot"].data.joint_vel.cpu().numpy()
-    joint_vel = [
-        np.char.add(isaac_joints, "_vel") for i in range(args_cli.num_envs)
-    ]
+    joint_vel = [np.char.add(isaac_joints, "_vel") for i in range(args_cli.num_envs)]
     joint_vel = np.asarray(joint_vel)
     # body_state = scene["robot"].data.root_state_w.cpu().numpy()
-    body_state = [
-        np.char.add("", isaac_body) for i in range(args_cli.num_envs)
-    ]
+    body_state = [np.char.add("", isaac_body) for i in range(args_cli.num_envs)]
     body_state = np.asarray(body_state)
 
     joint_states = isaac_joints_to_interface(joint_pos, joint_vel)

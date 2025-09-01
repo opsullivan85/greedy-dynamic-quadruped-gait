@@ -1,33 +1,12 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
-"""
-This script demonstrates how to add and simulate on-board sensors for a robot.
-
-We add the following sensors on the quadruped robot, ANYmal-C (ANYbotics):
-
-* Height Scanner: This is a height scanner sensor that is attached to the robot's base.
-* Contact Sensor: This is a contact sensor that is attached to the robot's feet.
-
-.. code-block:: bash
-
-    # Usage
-    ./isaaclab.sh -p scripts/tutorials/04_sensors/add_sensors_on_robot.py
-
-"""
-
-"""Launch Isaac Sim Simulator first."""
-
 import argparse
-from distutils import command
 
 from isaaclab.app import AppLauncher  # type: ignore
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a robot.")
-parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
+parser.add_argument(
+    "--num_envs", type=int, default=1, help="Number of environments to spawn."
+)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -39,38 +18,39 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import torch
+import copy
+import logging
 
 import isaaclab.sim as sim_utils  # type: ignore
+import numpy as np
+import torch
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg  # type: ignore
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # type: ignore
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
-import numpy as np
-import copy
 
-import src.robotinterface.siminterface as SimInterface
-from src.robotinterface.interface import RobotInterfaceVect
-from src.simulation.util import isaac_joints_to_interface, isaac_body_to_interface, interface_to_isaac_torques
-import logging
+import src.sim2real.siminterface as SimInterface
+from src.sim2real.vectinterface import RobotInterfaceVect
+from src.simulation.util import (
+    interface_to_isaac_torques,
+    isaac_body_to_interface,
+    isaac_joints_to_interface,
+)
+
 logger = logging.getLogger(__name__)
 
-##
-# Pre-defined configs
-##
-from isaaclab_assets.robots.unitree import UNITREE_GO1_CFG as ROBOT_CFG  # type: ignore
-from isaaclab.actuators import DCMotorCfg # type: ignore
-
+from isaaclab.actuators import DCMotorCfg  # type: ignore
+from isaaclab_assets.robots.unitree import UNITREE_GO1_CFG  # type: ignore
 
 # override the default ActuatorNetMLPCfg motors so we can usetorque control
-ROBOT_CFG_TORQUE = copy.deepcopy(ROBOT_CFG)
-ROBOT_CFG_TORQUE.actuators['base_legs'] = DCMotorCfg(
-        joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
-        effort_limit=23.7,
-        saturation_effort=23.7,
-        velocity_limit=30.0,
-        stiffness=0.0,
-        damping=0.0,
+ROBOT_CFG_TORQUE = copy.deepcopy(UNITREE_GO1_CFG)
+ROBOT_CFG_TORQUE.actuators["base_legs"] = DCMotorCfg(
+    joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
+    effort_limit=23.7,
+    saturation_effort=23.7,
+    velocity_limit=30.0,
+    stiffness=0.0,
+    damping=0.0,
 )
 
 
@@ -81,18 +61,20 @@ class SensorsSceneCfg(InteractiveSceneCfg):
     # ground plane
     # friction to simulate rubber on concrete
     ground = sim_utils.GroundPlaneCfg(
-        physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.8, dynamic_friction=0.8),
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            static_friction=0.8, dynamic_friction=0.8
+        ),
     )
     ground = AssetBaseCfg(prim_path="/World/defaultGroundPlane", spawn=ground)
 
     # lights
     dome_light = AssetBaseCfg(
-        prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
+        prim_path="/World/Light",
+        spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75)),
     )
 
     # robot
     robot: ArticulationCfg = ROBOT_CFG_TORQUE.replace(prim_path="{ENV_REGEX_NS}/Robot")
-
 
     # sensors
     height_scanner = RayCasterCfg(
@@ -105,13 +87,21 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         mesh_prim_paths=["/World/defaultGroundPlane"],
     )
     contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*_foot", update_period=0.0, history_length=6, debug_vis=True
+        prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
+        update_period=0.0,
+        history_length=6,
+        debug_vis=True,
     )
 
 
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     """Run the simulator."""
-    control_interface = RobotInterfaceVect(dt=sim.get_physics_dt(), instances=args_cli.num_envs, cls=SimInterface.SimInterface, debug_logging=False)
+    control_interface = RobotInterfaceVect(
+        dt=sim.get_physics_dt(),
+        instances=args_cli.num_envs,
+        cls=SimInterface.SimInterface,
+        debug_logging=False,
+    )
     # make the first one log
     # control_interface.interfaces[0].logger = SimInterface.logger
 
