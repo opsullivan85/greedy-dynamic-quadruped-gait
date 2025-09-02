@@ -29,7 +29,8 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # type: ignore
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
 from isaaclab.terrains import TerrainImporterCfg, TerrainGeneratorCfg  # type: ignore
-from isaaclab.terrains.height_field import hf_terrains_cfg  # type: ignore
+from isaaclab.actuators import DCMotorCfg  # type: ignore
+from isaaclab_assets.robots.unitree import UNITREE_GO1_CFG  # type: ignore
 
 
 from src.simulation.terrain_generation import HfVoidTerrainCfg
@@ -42,8 +43,6 @@ from src.simulation.util import (
 
 logger = logging.getLogger(__name__)
 
-from isaaclab.actuators import DCMotorCfg  # type: ignore
-from isaaclab_assets.robots.unitree import UNITREE_GO1_CFG  # type: ignore
 
 # override the default ActuatorNetMLPCfg motors so we can usetorque control
 ROBOT_CFG_TORQUE = copy.deepcopy(UNITREE_GO1_CFG)
@@ -57,12 +56,6 @@ ROBOT_CFG_TORQUE.actuators["base_legs"] = DCMotorCfg(
 )
 
 
-# @configclass
-# class Terrain(hf_terrains_cfg.HfSteppingStonesTerrainCfg):
-#     def __post_init__(self):
-
-
-
 @configclass
 class SensorsSceneCfg(InteractiveSceneCfg):
     """Design the scene with sensors on the robot."""
@@ -73,18 +66,16 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         terrain_type="generator",
         # https://isaac-sim.github.io/IsaacLab/v2.1.0/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg
         terrain_generator=TerrainGeneratorCfg(
-            size=(10,10),
-            difficulty_range=(0.4, 0.5),
-            horizontal_scale = 0.05,
-            slope_threshold = 0.1,
-            # vertical_scale = 0.5,
-            # color_scheme="height",
-
-            # https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.height_field.hf_terrains_cfg.HfSteppingStonesTerrainCfg
-            sub_terrains={"holes": HfVoidTerrainCfg(
-                void_depth=-0.5,
-                platform_size=0.5,
-            )},
+            size=(10, 10),
+            difficulty_range=(0.3, 0.3),
+            horizontal_scale=0.015,
+            slope_threshold=0,
+            sub_terrains={
+                "holes": HfVoidTerrainCfg(
+                    void_depth=-0.5,
+                    platform_size=1.0,
+                )
+            },
         ),
         physics_material=sim_utils.RigidBodyMaterialCfg(
             static_friction=0.8,
@@ -127,8 +118,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         cls=SimInterface,
         debug_logging=False,
     )
-    # make the first one log
-    # control_interface.interfaces[0].logger = SimInterface.logger
 
     sim_dt = sim.get_physics_dt()
     logger.debug(f"dt: {sim_dt}")
@@ -140,9 +129,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         # Reset
         if count % 500 == 0:
             logger.info("resetting the simulation")
-
-            # for interface in control_interface.interfaces:
-            #     interface.reset()
 
             # reset counter
             count = 0
@@ -188,9 +174,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         torques_isaac = torch.from_numpy(torques_isaac_np).to(scene.device)
 
         scene["robot"].set_joint_effort_target(torques_isaac)
-        # fake_torques = np.asarray([[20.0,]*12,]*args_cli.num_envs)
-        # fake_torques = torch.from_numpy(fake_torques).to(scene.device)
-        # scene["robot"].set_joint_effort_target(fake_torques)
 
         # -- write data to sim
         scene.write_data_to_sim()

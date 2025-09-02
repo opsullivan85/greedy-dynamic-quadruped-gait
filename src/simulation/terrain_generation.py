@@ -8,9 +8,7 @@ import scipy.ndimage
 
 
 @height_field_to_mesh
-def hole_terrain(
-    difficulty: float, cfg: "HfVoidTerrainCfg"
-) -> np.ndarray:
+def hole_terrain(difficulty: float, cfg: "HfVoidTerrainCfg") -> np.ndarray:
     """
 
     Note:
@@ -26,8 +24,15 @@ def hole_terrain(
         The shape of the array is (width, length), where width and length are the number of points
         along the x and y axis, respectively.
     """
+    # this scale variable fixes the "smoothing" done by the rest of the isaac heightfield pipeline
+    # the heightfield pipeline behaves unexpectdley when heights have high, alternating slopes.
+    # we are essentially going from this [ 0 1 0 1 1 0 ]
+    # to [ 0 0 0 1 1 1 0 0 0 1 1 1 1 1 1 0 0 0] (while actually maintaining the final output size)
     SCALE = 5
-    output_size = (int(cfg.size[0] / cfg.horizontal_scale), int(cfg.size[1] / cfg.horizontal_scale))
+    output_size = (
+        int(cfg.size[0] / cfg.horizontal_scale),
+        int(cfg.size[1] / cfg.horizontal_scale),
+    )
     shape_px = (output_size[0] // SCALE, output_size[1] // SCALE)
     terrain = np.zeros(shape_px, dtype=np.float32)
 
@@ -38,7 +43,7 @@ def hole_terrain(
     terrain[tuple(void_indices.T)] = cfg.void_depth / cfg.vertical_scale
 
     # add solid platform in center
-    platform_size_px = int(cfg.platform_size // cfg.horizontal_scale)
+    platform_size_px = int(cfg.platform_size / cfg.horizontal_scale / SCALE)
     platform_start = (
         int(shape_px[0] / 2 - platform_size_px / 2),
         int(shape_px[1] / 2 - platform_size_px / 2),
@@ -53,7 +58,15 @@ def hole_terrain(
 
     scaled_terrain = scipy.ndimage.zoom(terrain, SCALE, order=0)
     # pad with voids upto the output_size
-    padded_terrain = np.pad(scaled_terrain, ((0, output_size[0] - scaled_terrain.shape[0]), (0, output_size[1] - scaled_terrain.shape[1])), mode='constant', constant_values=cfg.void_depth)
+    padded_terrain = np.pad(
+        scaled_terrain,
+        (
+            (0, output_size[0] - scaled_terrain.shape[0]),
+            (0, output_size[1] - scaled_terrain.shape[1]),
+        ),
+        mode="constant",
+        constant_values=cfg.void_depth,
+    )
     return padded_terrain
 
 
