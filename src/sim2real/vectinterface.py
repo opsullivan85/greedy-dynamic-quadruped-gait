@@ -173,11 +173,13 @@ class VectSim2Real(Generic[T]):
                     error_msg = (
                         f"Worker {worker_id} error: {str(e)}\n{traceback.format_exc()}"
                     )
+                    logger.error(error_msg)
                     conn.send((Message.Worker.EXCEPTION, error_msg))
 
         except Exception as e:
             # Initialization failed
             error_msg = f"Worker {worker_id} initialization failed: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
             conn.send((Message.Worker.EXCEPTION, error_msg))
         finally:
             conn.close()
@@ -201,10 +203,11 @@ class VectSim2Real(Generic[T]):
             if response_type == Message.Worker.SUCCESS:
                 return result
             elif response_type == Message.Worker.EXCEPTION:
-                raise RuntimeError(f"Worker computation failed: {result}")
+                raise RuntimeError(f"Worker exception: {result}")
             else:
                 raise RuntimeError(f"Worker sent unexpected response: {response_type}")
         except Exception as e:
+            logger.error(f"Failed to receive result from worker: {e}")
             raise RuntimeError(f"Failed to receive result from worker: {e}")
 
     def call(
