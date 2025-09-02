@@ -75,7 +75,8 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         terrain_generator=TerrainGeneratorCfg(
             size=(10,10),
             difficulty_range=(0.4, 0.5),
-            horizontal_scale = 0.1,
+            horizontal_scale = 0.05,
+            slope_threshold = 0.1,
             # vertical_scale = 0.5,
             # color_scheme="height",
 

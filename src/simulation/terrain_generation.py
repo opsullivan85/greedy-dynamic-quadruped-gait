@@ -4,6 +4,7 @@ import numpy as np
 from isaaclab.terrains.height_field import hf_terrains_cfg  # type: ignore
 from isaaclab.terrains.height_field.utils import height_field_to_mesh  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
+import scipy.ndimage
 
 
 @height_field_to_mesh
@@ -25,8 +26,9 @@ def hole_terrain(
         The shape of the array is (width, length), where width and length are the number of points
         along the x and y axis, respectively.
     """
-
-    shape_px = (int(cfg.size[0] / cfg.horizontal_scale), int(cfg.size[1] / cfg.horizontal_scale))
+    SCALE = 5
+    output_size = (int(cfg.size[0] / cfg.horizontal_scale), int(cfg.size[1] / cfg.horizontal_scale))
+    shape_px = (output_size[0] // SCALE, output_size[1] // SCALE)
     terrain = np.zeros(shape_px, dtype=np.float32)
 
     # add voids
@@ -49,7 +51,10 @@ def hole_terrain(
         platform_start[0] : platform_end[0], platform_start[1] : platform_end[1]
     ] = 0
 
-    return terrain
+    scaled_terrain = scipy.ndimage.zoom(terrain, SCALE, order=0)
+    # pad with voids upto the output_size
+    padded_terrain = np.pad(scaled_terrain, ((0, output_size[0] - scaled_terrain.shape[0]), (0, output_size[1] - scaled_terrain.shape[1])), mode='constant', constant_values=cfg.void_depth)
+    return padded_terrain
 
 
 @configclass
