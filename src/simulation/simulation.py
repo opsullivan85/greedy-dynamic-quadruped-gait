@@ -31,6 +31,8 @@ from isaaclab.utils import configclass  # type: ignore
 from isaaclab.terrains import TerrainImporterCfg, TerrainGeneratorCfg  # type: ignore
 from isaaclab.terrains.height_field import hf_terrains_cfg  # type: ignore
 
+
+from src.simulation.terrain_generation import HfVoidTerrainCfg
 from src.sim2real import VectSim2Real, SimInterface
 from src.simulation.util import (
     interface_to_isaac_torques,
@@ -72,17 +74,15 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         # https://isaac-sim.github.io/IsaacLab/v2.1.0/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg
         terrain_generator=TerrainGeneratorCfg(
             size=(10,10),
-            difficulty_range=(0.5, 1.0),
-            horizontal_scale = 0.01,
-            vertical_scale = 0.5,
+            difficulty_range=(0.4, 0.5),
+            horizontal_scale = 0.1,
+            # vertical_scale = 0.5,
             # color_scheme="height",
 
             # https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.height_field.hf_terrains_cfg.HfSteppingStonesTerrainCfg
-            sub_terrains={"stepping_stones": hf_terrains_cfg.HfSteppingStonesTerrainCfg(
-                stone_height_max = 0.9,
-                stone_width_range = (0.05, 0.1),
-                stone_distance_range = (0.0, 0.3),
-                # holes_depth = -0.5,
+            sub_terrains={"holes": HfVoidTerrainCfg(
+                void_depth=-0.5,
+                platform_size=0.5,
             )},
         ),
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -158,7 +158,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 scene["robot"].data.default_joint_pos.clone(),
                 scene["robot"].data.default_joint_vel.clone(),
             )
-            # joint_pos += torch.rand_like(joint_pos) * 0.1
+            joint_pos += torch.rand_like(joint_pos) * 0.1
             scene["robot"].write_joint_state_to_sim(joint_pos, joint_vel)
             # clear internal buffers
             scene.reset()
