@@ -3,7 +3,7 @@ import logging
 import numpy as np
 from nptyping import Float32, NDArray, Shape
 
-from src.control import RobotRunnerFSM, RobotType
+from src.control import RobotRunnerMin, RobotType
 from src.sim2real.abstractinterface import Sim2RealInterface
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ class SimInterface(Sim2RealInterface):
         if debug_logging:
             self.logger = logger
 
-        self.robot_runner = RobotRunnerFSM()
+        self.robot_runner = RobotRunnerMin()
         self.robot_runner.init(RobotType.GO1, dt)
 
     def get_torques(
