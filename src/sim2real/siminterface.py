@@ -18,6 +18,7 @@ class SimInterface(Sim2RealInterface):
         self.robot_runner = RobotRunnerMin()
         self.robot_runner.init(RobotType.GO1, dt)
 
+    # override
     def get_torques(
         self,
         joint_states: NDArray[Shape["4, 3, 2"], Float32],
@@ -52,6 +53,7 @@ class SimInterface(Sim2RealInterface):
 
         return torques_converted
 
+    # override
     def reset(self) -> None:
         self.robot_runner.reset()
 
@@ -101,3 +103,25 @@ class SimInterface(Sim2RealInterface):
                 index 1: joint index (0-2) (hip, upper leg, lower leg)
         """
         return torques_control.reshape((4, 3))
+    
+    # override
+    def initiate_footstep(
+        self,
+        leg: int,
+        location_hip: NDArray[Shape["2"], Float32],
+        duration: float,
+    ):
+        """initiates a footstep for the specified leg at the specified location
+
+        Args:
+            leg (int): Index of the leg (0-3)
+            location_hip (NDArray[Shape["2"], Float32]): Desired foot position in the respective hip frame (x, y)
+                This position is relative to the hip of the specified leg.
+                z will be projected down to zero.
+            duration (float): Duration of the footstep
+        """
+        self.robot_runner.cMPC.initiate_footstep(
+            leg,
+            location_hip,
+            duration
+        )

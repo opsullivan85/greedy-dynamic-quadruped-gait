@@ -31,7 +31,6 @@ class Sim2RealInterface(ABC):
                 orientation (xyzw quaternion) = [3:7]
                 velocity = [7:10]
                 angular velocity = [10:13]
-                # TODO: what frames are each of these things in?
             command (np.ndarray): (3,) array of command:
                 x velocity = [0]
                 y velocity = [1]
@@ -43,6 +42,24 @@ class Sim2RealInterface(ABC):
                 index 1: joint index (0-2) (hip, upper leg, lower leg)
         """
         pass
+
+    @abstractmethod
+    def initiate_footstep(
+        self,
+        leg: int,
+        location_hip: NDArray[Shape["2"], Float32],
+        duration: float,
+    ):
+        """initiates a footstep for the specified leg at the specified location
+
+        Args:
+            leg (int): Index of the leg (0-3)
+            location_hip (NDArray[Shape["2"], Float32]): Desired foot position in the respective hip frame (x, y)
+                This position is relative to the hip of the specified leg.
+                z will be projected down to zero.
+            duration (float): Duration of the footstep
+        """
+        ...
 
     @abstractmethod
     def reset(self) -> None:
