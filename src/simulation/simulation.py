@@ -67,7 +67,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         # https://isaac-sim.github.io/IsaacLab/v2.1.0/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg
         terrain_generator=TerrainGeneratorCfg(
             size=(10, 10),
-            difficulty_range=(0.3, 0.3),
+            difficulty_range=(0.0, 0.0),
             horizontal_scale=0.015,
             slope_threshold=0,
             sub_terrains={
@@ -123,11 +123,12 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     logger.debug(f"dt: {sim_dt}")
     sim_time = 0.0
     count = 0
+    step_state = True
 
     # Simulate physics
     while simulation_app.is_running():
         # Reset
-        if count % 500 == 0:
+        if count % 5000 == 0:
             logger.info("resetting the simulation")
 
             # reset counter
@@ -145,7 +146,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 scene["robot"].data.default_joint_pos.clone(),
                 scene["robot"].data.default_joint_vel.clone(),
             )
-            joint_pos += torch.rand_like(joint_pos) * 0.1
+            # joint_pos += torch.rand_like(joint_pos) * 0.1
             scene["robot"].write_joint_state_to_sim(joint_pos, joint_vel)
             # clear internal buffers
             scene.reset()
@@ -153,6 +154,48 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 function=SimInterface.reset,
                 mask=None,
             )
+
+        # step in place every 200ms
+        if count % 40 == 0:
+            if step_state:
+                control_interface.call(
+                    SimInterface.initiate_footstep,
+                    mask=None,
+                    leg=np.repeat(np.array([0]), args_cli.num_envs),
+                    location_hip=np.repeat(
+                        np.asarray([0.1, 0.1])[None, :], args_cli.num_envs, axis=0
+                    ),
+                    duration=np.repeat(np.array([0.2]), args_cli.num_envs),
+                )
+                control_interface.call(
+                    SimInterface.initiate_footstep,
+                    mask=None,
+                    leg=np.repeat(np.array([3]), args_cli.num_envs),
+                    location_hip=np.repeat(
+                        np.asarray([-0.1, -0.1])[None, :], args_cli.num_envs, axis=0
+                    ),
+                    duration=np.repeat(np.array([0.2]), args_cli.num_envs),
+                )
+            else:
+                control_interface.call(
+                    SimInterface.initiate_footstep,
+                    mask=None,
+                    leg=np.repeat(np.array([1]), args_cli.num_envs),
+                    location_hip=np.repeat(
+                        np.asarray([0.1, -0.1])[None, :], args_cli.num_envs, axis=0
+                    ),
+                    duration=np.repeat(np.array([0.2]), args_cli.num_envs),
+                )
+                control_interface.call(
+                    SimInterface.initiate_footstep,
+                    mask=None,
+                    leg=np.repeat(np.array([2]), args_cli.num_envs),
+                    location_hip=np.repeat(
+                        np.asarray([-0.1, 0.1])[None, :], args_cli.num_envs, axis=0
+                    ),
+                    duration=np.repeat(np.array([0.2]), args_cli.num_envs),
+                )
+            step_state = not step_state
 
         joint_pos = scene["robot"].data.joint_pos.cpu().numpy()
         joint_vel = scene["robot"].data.joint_vel.cpu().numpy()
@@ -162,6 +205,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         body_state = isaac_body_to_interface(body_state)
 
         command = np.zeros((args_cli.num_envs, 3), dtype=np.float32)
+        command[:, 0] = 0.3
+        command[:, 2] = 0.2
 
         torques_interface = control_interface.call(
             function=SimInterface.get_torques,
