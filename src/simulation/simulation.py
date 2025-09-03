@@ -67,7 +67,7 @@ class SensorsSceneCfg(InteractiveSceneCfg):
         # https://isaac-sim.github.io/IsaacLab/v2.1.0/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg
         terrain_generator=TerrainGeneratorCfg(
             size=(10, 10),
-            difficulty_range=(0.3, 0.3),
+            difficulty_range=(0.0, 0.0),
             horizontal_scale=0.015,
             slope_threshold=0,
             sub_terrains={
@@ -205,6 +205,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         body_state = isaac_body_to_interface(body_state)
 
         command = np.zeros((args_cli.num_envs, 3), dtype=np.float32)
+        command[:, 0] = 0.3
+        command[:, 2] = 0.2
 
         torques_interface = control_interface.call(
             function=SimInterface.get_torques,
