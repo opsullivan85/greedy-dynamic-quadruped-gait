@@ -1,4 +1,5 @@
 import argparse
+import signal
 
 from isaaclab.app import AppLauncher
 
@@ -25,6 +26,7 @@ import torch
 from isaaclab.utils import configclass  # type: ignore
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg  # type: ignore
 from isaaclab.scene import InteractiveSceneCfg
+import multiprocessing
 
 from src.simulation.cfg.manager_components import (
     ActionsCfg,
@@ -60,7 +62,7 @@ class QuadrupedEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         # general settings
-        self.decimation = 4  # env decimation -> 50 Hz control
+        self.decimation = 2  # env decimation -> 100 Hz control
         # simulation settings
         self.sim.dt = 0.005  # simulation timestep -> 200 Hz physics
         self.sim.physics_material = self.scene.terrain.physics_material
@@ -104,7 +106,7 @@ def walk_in_place(
     count: int, step_state: bool, control_interface: VectObjectPool
 ) -> bool:
     # step in place every 200ms
-    if count % 40 == 0:
+    if count % 20 == 0:
         if step_state:
             control_interface.call(
                 SimInterface.initiate_footstep,
@@ -147,6 +149,19 @@ def walk_in_place(
     return step_state
 
 
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+def signal_handler(sig, frame):
+    global shutdown_requested
+    if multiprocessing.current_process().name == "MainProcess":
+        signal_name = signal.Signals(sig).name
+        logger.info(f"Signal {signal_name} received in main process, shutting down...")
+    shutdown_requested = True
+
+# Set up the signal handler for SIGINT (Ctrl+C)
+signal.signal(signal.SIGINT, signal_handler)
+
 def main():
     """Main function."""
     # create environment configuration
@@ -158,8 +173,7 @@ def main():
     make_controllers = lambda: VectObjectPool(
         instances=args_cli.num_envs,
         cls=SimInterface,
-        dt=env_cfg.sim.dt,
-        # dt=env_cfg.sim.dt * env_cfg.decimation,
+        dt=env_cfg.sim.dt * env_cfg.decimation,
         debug_logging=False,
     )
     step_state = False
@@ -167,7 +181,7 @@ def main():
     # simulate physics
     count = 0
     with make_controllers() as controllers:
-        while simulation_app.is_running():
+        while simulation_app.is_running() and not shutdown_requested:  # Add flag check
             with torch.inference_mode():
 
                 step_state = walk_in_place(count, step_state, controllers)
@@ -178,6 +192,8 @@ def main():
 
                 # step the environment
                 obs, rew, terminated, truncated, info = env.step(joint_efforts)
+                # TODO: remove time from observations
+                print(obs["policy"].cpu().numpy()[0,-1])
 
                 # update counter
                 count += 1

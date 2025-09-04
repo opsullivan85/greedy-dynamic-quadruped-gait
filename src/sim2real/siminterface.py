@@ -16,7 +16,7 @@ class SimInterface(Sim2RealInterface):
             self.logger = logger
 
         self.robot_runner = RobotRunnerMin()
-        self.robot_runner.init(RobotType.GO1, dt)
+        self.robot_runner.init(RobotType.GO1, dt=dt)
 
     # override
     def get_torques(

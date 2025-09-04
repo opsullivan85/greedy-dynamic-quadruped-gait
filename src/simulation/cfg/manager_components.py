@@ -76,6 +76,8 @@ class ObservationsCfg:
             noise=Unoise(n_min=-0.1, n_max=0.1),
             clip=(-1.0, 1.0),
         )
+        # TODO: REMOVE THIS
+        time = ObsTerm(func=mdp.current_time_s)
 
         def __post_init__(self):
             self.enable_corruption = True
@@ -140,14 +142,16 @@ class EventsCfg:
         },
     )
 
-    reset_robot_joints = EventTerm(
-        func=mdp.reset_joints_by_scale,
-        mode="reset",
-        params={
-            "position_range": (1.0, 1.0),
-            "velocity_range": (0.0, 0.0),
-        },
-    )
+    # TODO: figure out a way to initilize the controller
+    # state estimator
+    # reset_robot_joints = EventTerm(
+    #     func=mdp.reset_joints_by_scale,
+    #     mode="reset",
+    #     params={
+    #         "position_range": (1.0, 1.0),
+    #         "velocity_range": (0.0, 0.0),
+    #     },
+    # )
 
 @configclass
 class TerminationsCfg:
