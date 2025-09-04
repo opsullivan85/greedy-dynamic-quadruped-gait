@@ -1,10 +1,13 @@
-from dataclasses import MISSING
+from typing import Callable
 
+import isaaclab.sim as sim_utils  # type: ignore
 import numpy as np
+import scipy.ndimage  # type: ignore
+from isaaclab.terrains import TerrainGeneratorCfg  # type: ignore
+from isaaclab.terrains import TerrainImporterCfg  # type: ignore
 from isaaclab.terrains.height_field import hf_terrains_cfg  # type: ignore
 from isaaclab.terrains.height_field.utils import height_field_to_mesh  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
-import scipy.ndimage
 
 
 @height_field_to_mesh
@@ -80,3 +83,26 @@ class HfVoidTerrainCfg(hf_terrains_cfg.HfTerrainBaseCfg):
     """The depth of the voids (negative obstacles). Defaults to -10.0."""
     platform_size: float = 1.0
     """The width of the platform at the center of the terrain. Defaults to 1.0."""
+
+
+VoidTerrainImporterCfg: Callable[[], TerrainImporterCfg] = lambda: TerrainImporterCfg(
+    prim_path="/World/defaultGroundPlane",
+    terrain_type="generator",
+    # https://isaac-sim.github.io/IsaacLab/v2.1.0/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg
+    terrain_generator=TerrainGeneratorCfg(
+        size=(10, 10),
+        difficulty_range=(0.0, 0.0),
+        horizontal_scale=0.015,
+        slope_threshold=0,
+        sub_terrains={
+            "holes": HfVoidTerrainCfg(
+                void_depth=-0.5,
+                platform_size=1.0,
+            )
+        },
+    ),
+    physics_material=sim_utils.RigidBodyMaterialCfg(
+        static_friction=0.8,
+        dynamic_friction=0.8,
+    ),
+)
