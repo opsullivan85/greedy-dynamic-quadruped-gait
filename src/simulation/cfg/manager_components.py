@@ -1,10 +1,13 @@
 import math
-import isaaclab.envs.mdp as mdp  # type: ignore
+# import isaaclab.envs.mdp as mdp  # type: ignore
+import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp  # type: ignore
 import torch
 from isaaclab.envs import ManagerBasedEnv  # type: ignore
 from isaaclab.managers import EventTermCfg as EventTerm  # type: ignore
+from isaaclab.managers import TerminationTermCfg as DoneTerm  # type: ignore
 from isaaclab.managers import ObservationGroupCfg as ObsGroup  # type: ignore
 from isaaclab.managers import ObservationTermCfg as ObsTerm  # type: ignore
+from isaaclab.managers import RewardTermCfg as RewTerm  # type: ignore
 from isaaclab.managers import SceneEntityCfg  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise  # type: ignore
@@ -19,7 +22,7 @@ def constant_commands(env: ManagerBasedEnv) -> torch.Tensor:
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    joint_pos = mdp.JointEffortActionCfg(
+    joint_effort = mdp.JointEffortActionCfg(
         asset_name="robot", joint_names=[".*"], scale=1.0
     )
 
@@ -83,32 +86,84 @@ class ObservationsCfg:
 
 
 @configclass
-class EventCfg:
+class EventsCfg:
     """Configuration for events."""
 
-    # on reset
-    # TODO: how do I also reset my controller here?
-    reset_scene = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
+    # startup
+    physics_material = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "static_friction_range": (0.8, 0.8),
+            "dynamic_friction_range": (0.6, 0.6),
+            "restitution_range": (0.0, 0.0),
+            "num_buckets": 64,
+        },
+    )
 
-    # on startup
-    randomize_mass = EventTerm(
+    add_base_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=[".*"]),
-            "mass_distribution_params": (0.9, 1.1),
-            "operation": "scale",
-            "recompute_inertia": True,
+            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
+            "mass_distribution_params": (-1.0, 3.0),
+            "operation": "add",
         },
     )
 
     # on reset
-    reset_cart_position = EventTerm(
-        func=mdp.reset_joints_by_offset,
+    # TODO: how do I also reset my controller here?
+    base_external_force_torque = EventTerm(
+        func=mdp.apply_external_force_torque,
         mode="reset",
         params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-            "position_range": (-0.05 * math.pi, 0.05 * math.pi),
-            "velocity_range": (-0.1, 0.1),
+            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
+            "force_range": (0.0, 0.0),
+            "torque_range": (-0.0, 0.0),
         },
     )
+
+    reset_base = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
+            "velocity_range": {
+                "x": (0.0, 1.0),
+                "y": (0.0, 1.0),
+                "z": (0.0, 0.0),
+                "roll": (0.0, 0.0),
+                "pitch": (0.0, 0.0),
+                "yaw": (0.0, 0.0),
+            },
+        },
+    )
+
+    reset_robot_joints = EventTerm(
+        func=mdp.reset_joints_by_scale,
+        mode="reset",
+        params={
+            "position_range": (1.0, 1.0),
+            "velocity_range": (0.0, 0.0),
+        },
+    )
+
+@configclass
+class TerminationsCfg:
+    """Termination terms for the MDP."""
+
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
+    base_contact = DoneTerm(
+        func=mdp.illegal_contact,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="trunk"), "threshold": 1.0},
+    )
+
+
+@configclass
+class RewardsCfg:
+    """Reward terms for the MDP."""
+
+    alive = RewTerm(func=mdp.is_alive, weight=1.0)
+
+    terminating = RewTerm(func=mdp.is_terminated, weight=-2.0)

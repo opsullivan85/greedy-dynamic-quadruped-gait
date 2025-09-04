@@ -20,14 +20,12 @@ simulation_app = app_launcher.app
 
 import logging
 
-import isaaclab.sim as sim_utils  # type: ignore
 import numpy as np
 import torch
-from isaaclab.scene import InteractiveScene  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
-from isaaclab.envs import ManagerBasedEnv, ManagerBasedEnvCfg  # type: ignore
+from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg  # type: ignore
 
-from src.simulation.cfg.manager_components import ActionsCfg, EventCfg, ObservationsCfg
+from src.simulation.cfg.manager_components import ActionsCfg, EventsCfg, ObservationsCfg, RewardsCfg, TerminationsCfg
 from src.simulation.cfg.scene import SceneCfg
 from src.sim2real import SimInterface, VectSim2Real
 from src.simulation.util import (
@@ -40,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 @configclass
-class QuadrupedEnvCfg(ManagerBasedEnvCfg):
+class QuadrupedEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings
@@ -48,7 +46,9 @@ class QuadrupedEnvCfg(ManagerBasedEnvCfg):
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
-    events: EventCfg = EventCfg()
+    events: EventsCfg = EventsCfg()
+    terminations: TerminationsCfg = TerminationsCfg()
+    rewards: RewardsCfg = RewardsCfg()
 
     def __post_init__(self):
         """Post initialization."""
@@ -58,6 +58,8 @@ class QuadrupedEnvCfg(ManagerBasedEnvCfg):
         self.sim.dt = 0.005  # simulation timestep -> 200 Hz physics
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.device = args_cli.device
+
+        self.episode_length_s = 5
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
         for scanner in [
@@ -71,38 +73,27 @@ class QuadrupedEnvCfg(ManagerBasedEnvCfg):
 
 def main():
     """Main function."""
-    # setup base environment
+    # create environment configuration
     env_cfg = QuadrupedEnvCfg()
-    env = ManagerBasedEnv(cfg=env_cfg)
-
-    # load level policy
-    # policy_path = ISAACLAB_NUCLEUS_DIR + "/Policies/ANYmal-C/HeightScan/policy.pt"
-    # # check if policy file exists
-    # if not check_file_path(policy_path):
-    #     raise FileNotFoundError(f"Policy file '{policy_path}' does not exist.")
-    # file_bytes = read_file(policy_path)
-    # # jit load the policy
-    # policy = torch.jit.load(file_bytes).to(env.device).eval()
+    env_cfg.scene.num_envs = args_cli.num_envs
+    env_cfg.sim.device = args_cli.device
+    # setup RL environment
+    env = ManagerBasedRLEnv(cfg=env_cfg)
 
     # simulate physics
     count = 0
-    obs, _ = env.reset()
     while simulation_app.is_running():
         with torch.inference_mode():
-            # reset
-            if count % 200 == 0:
-                obs, _ = env.reset()
-                count = 0
-                print("-" * 80)
-                print("[INFO]: Resetting environment...")
-            # infer action
-            # action = policy(obs["policy"])
-            # make action all zeros for now
-            action = torch.zeros(
-                (env.num_envs, 12), device=env.device
-            )
-            # step env
-            obs, _ = env.step(action)
+            # # reset
+            # if count % 300 == 0:
+            #     count = 0
+            #     env.reset()
+            #     print("-" * 80)
+            #     print("[INFO]: Resetting environment...")
+            # sample random actions
+            joint_efforts = torch.randn_like(env.action_manager.action)
+            # step the environment
+            obs, rew, terminated, truncated, info = env.step(joint_efforts)
             # update counter
             count += 1
 

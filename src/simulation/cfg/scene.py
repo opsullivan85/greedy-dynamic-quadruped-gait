@@ -28,9 +28,8 @@ class SceneCfg(InteractiveSceneCfg):
     RR_foot_scanner: RayCasterCfg = RR_FootstepScannerCfg()
 
     contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
+        prim_path="{ENV_REGEX_NS}/Robot/trunk",
         update_period=0.0,
-        history_length=6,
         debug_vis=True,
     )
 
