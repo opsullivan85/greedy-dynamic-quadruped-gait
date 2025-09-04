@@ -27,7 +27,7 @@ from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg  # type: ignor
 
 from src.simulation.cfg.manager_components import ActionsCfg, EventsCfg, ObservationsCfg, RewardsCfg, TerminationsCfg
 from src.simulation.cfg.scene import SceneCfg
-from src.sim2real import SimInterface, VectSim2Real
+from src.sim2real import SimInterface, VectObjectPool
 from src.simulation.util import (
     interface_to_isaac_torques,
     isaac_body_to_interface,

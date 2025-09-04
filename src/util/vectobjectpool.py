@@ -6,9 +6,7 @@ from multiprocessing.connection import Connection
 from typing import Any, Callable, Generic, Type, TypeVar
 
 import numpy as np
-from nptyping import Float32, NDArray, Shape, Bool, Number
-
-from src.sim2real.abstractinterface import Sim2RealInterface
+from nptyping import NDArray, Shape, Bool, Number
 
 import enum
 
@@ -30,22 +28,20 @@ class Message:
     Worker = _WorkerMessages
 
 
-T = TypeVar("T", bound=Sim2RealInterface)
+T = TypeVar("T")
 
 
-class VectSim2Real(Generic[T]):
-    """Provides a vectorized wrapper around a RobotInterface using multiprocessing.
+class VectObjectPool(Generic[T]):
+    """Provides a vectorized wrapper around a objects using multiprocessing.
 
-    Robot interfaces are distributed across worker processes to handle CPU-bound
+    useful over a multiprocessing.Pool when the objects cannot be serialized
+
+    classes are distributed across worker processes to handle CPU-bound
     computations in parallel while maintaining state persistence across calls.
-
-    Function signatures are almost exactly the same as those from Sim2RealInterface.
-    just look there for documentation
     """
 
     def __init__(
         self,
-        dt: float,
         instances: int,
         cls: Type[T],
         num_workers: None | int = None,
@@ -54,13 +50,12 @@ class VectSim2Real(Generic[T]):
         """
 
         Args:
-            dt: Time step for robot interfaces
-            instances: Number of robot interface instances to create
-            cls: The RobotInterface class to instantiate
+            instances: Number of object instances to create
+            cls: The Class to instantiate
             num_workers: Number of worker processes (default: cpu_count())
                 automatically set to the number of instances if that is lower
                 than the desired number of workers
-            **kwargs: Additional arguments passed to RobotInterface constructor
+            **kwargs: Additional arguments passed to Class constructor
         """
         self.instances = instances
         self.num_workers = min(num_workers or cpu_count(), instances)
@@ -69,24 +64,24 @@ class VectSim2Real(Generic[T]):
         self.pipes: list[Connection] = []
 
         # Setup workers
-        self._setup_workers(dt, cls, **kwargs)
+        self._setup_workers(cls, **kwargs)
 
     def _batch_data(self, data: np.ndarray) -> list[np.ndarray]:
         """Batches data to be sent to the workers"""
         return np.array_split(data, self.num_workers)
 
-    def _setup_workers(self, dt: float, cls: Type[T], **kwargs) -> None:
+    def _setup_workers(self, cls: Type[T], **kwargs) -> None:
         """Setup worker processes and verify they initialized successfully."""
-        robot_assignments = self._batch_data(np.arange(self.instances))
-        # figure out how many robots each worker has
-        worker_robots = [assignment.shape[0] for assignment in robot_assignments]
+        object_assignments = self._batch_data(np.arange(self.instances))
+        # figure out how many objects each worker has
+        worker_objects = [assignment.shape[0] for assignment in object_assignments]
 
-        for worker_id, num_robots in zip(range(self.num_workers), worker_robots):
+        for worker_id, num_objects in zip(range(self.num_workers), worker_objects):
             parent_conn, child_conn = Pipe()
 
             worker = Process(
                 target=self._worker_loop,
-                args=(child_conn, worker_id, cls, dt, num_robots, kwargs),
+                args=(child_conn, worker_id, cls, num_objects, kwargs),
             )
             worker.start()
 
@@ -122,16 +117,15 @@ class VectSim2Real(Generic[T]):
         conn: Connection,
         worker_id: int,
         cls: Type[T],
-        dt: float,
-        num_robots: int,
+        num_objects: int,
         kwargs: dict,
     ) -> None:
-        """Main loop for worker process. Creates and maintains multiple RobotInterface instances."""
+        """Main loop for worker process. Creates and maintains multiple Class instances."""
         try:
-            # Initialize all robot interfaces for this worker
-            interfaces = [cls(dt=dt, **kwargs) for _ in range(num_robots)]
+            # Initialize all objects for this worker
+            objects = [cls(**kwargs) for _ in range(num_objects)]
 
-            logger.debug(f"started worker id {worker_id} with {num_robots} robots")
+            logger.debug(f"started worker id {worker_id} with {num_objects} objects")
 
             # Main processing loop
             while True:
@@ -144,13 +138,13 @@ class VectSim2Real(Generic[T]):
                     elif command == Message.Manager.CALL_FUNCTION:
                         function_name, mask, batch_args = data
 
-                        # Process each robot in this worker's batch
+                        # Process each object in this worker's batch
                         results_list = []
-                        for i in range(len(interfaces)):
+                        for i in range(len(objects)):
                             if not mask[i]:
                                 # nan here still allows the output array to be typed
                                 results_list.append(np.nan)
-                            function = getattr(interfaces[i], function_name)
+                            function = getattr(objects[i], function_name)
                             args = [batch_arg[i] for batch_arg in batch_args]
                             result = function(*args)
                             results_list.append(result)
@@ -216,7 +210,7 @@ class VectSim2Real(Generic[T]):
         mask: None | NDArray[Shape["*"], Bool],
         **kwargs: NDArray[Shape["*, ..."], Number],
     ) -> NDArray[Shape["*, ..."], Any]:
-        """Calls a function on all of the underlying interfaces
+        """Calls a function on all of the underlying objects
 
         Args:
             function (Callable): function to call (should be a handle to a function from T)
@@ -274,7 +268,7 @@ class VectSim2Real(Generic[T]):
         # gather results
         results = []
         for pipe in self.pipes:
-            batched_torques = VectSim2Real._expect_success(pipe)
+            batched_torques = VectObjectPool._expect_success(pipe)
             results.append(batched_torques)
 
         return np.concatenate(results)
@@ -282,22 +276,27 @@ class VectSim2Real(Generic[T]):
     def _cleanup(self) -> None:
         """Clean up worker processes and pipes."""
         # Send shutdown signal to all responsive workers
-        for pipe in self.pipes:
+        for i, pipe in enumerate(self.pipes, start=1):
             try:
                 if pipe is not None:
                     pipe.send((Message.Manager.SHUTDOWN, None))
                     pipe.recv()  # Wait for acknowledgment
                     pipe.close()
+                    logger.info(f"Cleaned up pipe {i}/{len(self.pipes)}")
             except:
+                logger.info(f"Pipe {i} unresponsive during cleanup")
                 pass  # Worker may already be dead
 
         # Terminate any remaining worker processes
-        for worker in self.workers:
+        for i, worker in enumerate(self.workers, start=1):
             if worker.is_alive():
                 worker.terminate()
                 worker.join(timeout=0.1)
                 if worker.is_alive():
                     worker.kill()  # Force kill if terminate didn't work
+                    logger.warning(f"Force killed worker {i}/{len(self.workers)}")
+                else:
+                    logger.info(f"Terminated worker {i}/{len(self.workers)}")
 
         self.workers.clear()
         self.pipes.clear()
