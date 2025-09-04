@@ -90,7 +90,7 @@ def main():
     while simulation_app.is_running():
         with torch.inference_mode():
             # reset
-            if count % 1000 == 0:
+            if count % 200 == 0:
                 obs, _ = env.reset()
                 count = 0
                 print("-" * 80)

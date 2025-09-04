@@ -1,3 +1,4 @@
+import math
 import isaaclab.envs.mdp as mdp  # type: ignore
 import torch
 from isaaclab.envs import ManagerBasedEnv  # type: ignore
@@ -85,4 +86,29 @@ class ObservationsCfg:
 class EventCfg:
     """Configuration for events."""
 
+    # on reset
+    # TODO: how do I also reset my controller here?
     reset_scene = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
+
+    # on startup
+    randomize_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=[".*"]),
+            "mass_distribution_params": (0.9, 1.1),
+            "operation": "scale",
+            "recompute_inertia": True,
+        },
+    )
+
+    # on reset
+    reset_cart_position = EventTerm(
+        func=mdp.reset_joints_by_offset,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+            "position_range": (-0.05 * math.pi, 0.05 * math.pi),
+            "velocity_range": (-0.1, 0.1),
+        },
+    )
