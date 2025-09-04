@@ -1,13 +1,5 @@
 import copy
-import logging
 
-import isaaclab.sim as sim_utils  # type: ignore
-import numpy as np
-import torch
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg  # type: ignore
-from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # type: ignore
-from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns  # type: ignore
-from isaaclab.utils import configclass  # type: ignore
 from isaaclab.actuators import DCMotorCfg  # type: ignore
 from isaaclab_assets.robots.unitree import UNITREE_GO1_CFG  # type: ignore
 

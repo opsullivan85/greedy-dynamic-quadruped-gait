@@ -1,6 +1,8 @@
 import argparse
 
 from isaaclab.app import AppLauncher
+from src.simulation.cfg.manager_components import ActionsCfg, EventCfg, ObservationsCfg
+from src.simulation.cfg.scene import SceneCfg
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a robot.")
@@ -29,14 +31,14 @@ from isaaclab.sensors import ContactSensorCfg, RayCasterCfg  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
 
 from src.sim2real import SimInterface, VectSim2Real
-from src.simulation.cfg.footstep_scanner_cfg import (
+from src.simulation.cfg.footstep_scanner import (
     FL_FootstepScannerCfg,
     FR_FootstepScannerCfg,
     RL_FootstepScannerCfg,
     RR_FootstepScannerCfg,
 )
-from src.simulation.cfg.robot_cfg import ROBOT_CFG
-from src.simulation.cfg.terrain_cfg import VoidTerrainImporterCfg
+from src.simulation.cfg.robot import ROBOT_CFG
+from src.simulation.cfg.terrain import VoidTerrainImporterCfg
 from src.simulation.util import (
     interface_to_isaac_torques,
     isaac_body_to_interface,
@@ -47,32 +49,28 @@ logger = logging.getLogger(__name__)
 
 
 @configclass
-class SensorsSceneCfg(InteractiveSceneCfg):
-    """Design the scene with sensors on the robot."""
+class QuadrupedEnvCfg(ManagerBasedEnvCfg):
+    """Configuration for the locomotion velocity-tracking environment."""
 
-    # Replace ground plane with stepping stones terrain
-    ground = VoidTerrainImporterCfg()
+    # Scene settings
+    scene: SceneCfg = SceneCfg(num_envs=args_cli.num_envs, env_spacing=2.5)
+    # Basic settings
+    observations: ObservationsCfg = ObservationsCfg()
+    actions: ActionsCfg = ActionsCfg()
+    events: EventCfg = EventCfg()
 
-    # lights
-    dome_light = AssetBaseCfg(
-        prim_path="/World/Light",
-        spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75)),
-    )
-
-    # robot
-    robot: ArticulationCfg = ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-
-    FR_foot_scanner: RayCasterCfg = FR_FootstepScannerCfg()
-    FL_foot_scanner: RayCasterCfg = FL_FootstepScannerCfg()
-    RL_foot_scanner: RayCasterCfg = RL_FootstepScannerCfg()
-    RR_foot_scanner: RayCasterCfg = RR_FootstepScannerCfg()
-    # contact forces on feet
-    contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
-        update_period=0.0,
-        history_length=6,
-        debug_vis=True,
-    )
+    def __post_init__(self):
+        """Post initialization."""
+        # general settings
+        self.decimation = 4  # env decimation -> 50 Hz control
+        # simulation settings
+        self.sim.dt = 0.005  # simulation timestep -> 200 Hz physics
+        self.sim.physics_material = self.scene.terrain.physics_material
+        self.sim.device = args_cli.device
+        # update sensor update periods
+        # we tick all the sensors based on the smallest update period (physics update period)
+        if self.scene.height_scanner is not None:
+            self.scene.height_scanner.update_period = self.decimation * self.sim.dt  # 50 Hz
 
 
 def reset_simulator(

@@ -86,7 +86,7 @@ class HfVoidTerrainCfg(hf_terrains_cfg.HfTerrainBaseCfg):
 
 
 VoidTerrainImporterCfg: Callable[[], TerrainImporterCfg] = lambda: TerrainImporterCfg(
-    prim_path="/World/defaultGroundPlane",
+    prim_path="/World/ground",
     terrain_type="generator",
     # https://isaac-sim.github.io/IsaacLab/v2.1.0/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg
     terrain_generator=TerrainGeneratorCfg(
@@ -102,7 +102,9 @@ VoidTerrainImporterCfg: Callable[[], TerrainImporterCfg] = lambda: TerrainImport
         },
     ),
     physics_material=sim_utils.RigidBodyMaterialCfg(
-        static_friction=0.8,
-        dynamic_friction=0.8,
+        friction_combine_mode="multiply",
+        restitution_combine_mode="multiply",
+        static_friction=1.0,
+        dynamic_friction=1.0,
     ),
 )
