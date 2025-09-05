@@ -116,7 +116,7 @@ def walk_in_place(
             mask=None,
             leg=np.repeat(np.array([0]), args_cli.num_envs),
             location_hip=np.repeat(
-                np.asarray([0.1, 0.1])[None, :], args_cli.num_envs, axis=0
+                np.asarray([0.05, 0.1])[None, :], args_cli.num_envs, axis=0
             ),
             duration=np.repeat(np.array([0.2]), args_cli.num_envs),
         )
@@ -125,7 +125,7 @@ def walk_in_place(
             mask=None,
             leg=np.repeat(np.array([3]), args_cli.num_envs),
             location_hip=np.repeat(
-                np.asarray([-0.1, -0.1])[None, :], args_cli.num_envs, axis=0
+                np.asarray([-0.05, -0.1])[None, :], args_cli.num_envs, axis=0
             ),
             duration=np.repeat(np.array([0.2]), args_cli.num_envs),
         )
@@ -135,7 +135,7 @@ def walk_in_place(
             mask=None,
             leg=np.repeat(np.array([1]), args_cli.num_envs),
             location_hip=np.repeat(
-                np.asarray([0.1, -0.1])[None, :], args_cli.num_envs, axis=0
+                np.asarray([0.05, -0.1])[None, :], args_cli.num_envs, axis=0
             ),
             duration=np.repeat(np.array([0.2]), args_cli.num_envs),
         )
@@ -144,7 +144,7 @@ def walk_in_place(
             mask=None,
             leg=np.repeat(np.array([2]), args_cli.num_envs),
             location_hip=np.repeat(
-                np.asarray([-0.1, 0.1])[None, :], args_cli.num_envs, axis=0
+                np.asarray([-0.05, 0.1])[None, :], args_cli.num_envs, axis=0
             ),
             duration=np.repeat(np.array([0.2]), args_cli.num_envs),
         )
