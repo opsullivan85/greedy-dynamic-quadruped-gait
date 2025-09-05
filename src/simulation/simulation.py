@@ -108,51 +108,54 @@ def controls_to_joint_efforts(
 
 
 def walk_in_place(
-    count: int, step_state: bool, control_interface: VectorPool
-) -> bool:
-    # step in place every 200ms
-    if count % 20 == 0:
-        if step_state:
-            control_interface.call(
-                SimInterface.initiate_footstep,
-                mask=None,
-                leg=np.repeat(np.array([0]), args_cli.num_envs),
-                location_hip=np.repeat(
-                    np.asarray([0.1, 0.1])[None, :], args_cli.num_envs, axis=0
-                ),
-                duration=np.repeat(np.array([0.2]), args_cli.num_envs),
-            )
-            control_interface.call(
-                SimInterface.initiate_footstep,
-                mask=None,
-                leg=np.repeat(np.array([3]), args_cli.num_envs),
-                location_hip=np.repeat(
-                    np.asarray([-0.1, -0.1])[None, :], args_cli.num_envs, axis=0
-                ),
-                duration=np.repeat(np.array([0.2]), args_cli.num_envs),
-            )
-        else:
-            control_interface.call(
-                SimInterface.initiate_footstep,
-                mask=None,
-                leg=np.repeat(np.array([1]), args_cli.num_envs),
-                location_hip=np.repeat(
-                    np.asarray([0.1, -0.1])[None, :], args_cli.num_envs, axis=0
-                ),
-                duration=np.repeat(np.array([0.2]), args_cli.num_envs),
-            )
-            control_interface.call(
-                SimInterface.initiate_footstep,
-                mask=None,
-                leg=np.repeat(np.array([2]), args_cli.num_envs),
-                location_hip=np.repeat(
-                    np.asarray([-0.1, 0.1])[None, :], args_cli.num_envs, axis=0
-                ),
-                duration=np.repeat(np.array([0.2]), args_cli.num_envs),
-            )
-        return not step_state
-    return step_state
-
+    count: int, control_interface: VectorPool
+):
+    def step1():
+        control_interface.call(
+            SimInterface.initiate_footstep,
+            mask=None,
+            leg=np.repeat(np.array([0]), args_cli.num_envs),
+            location_hip=np.repeat(
+                np.asarray([0.1, 0.1])[None, :], args_cli.num_envs, axis=0
+            ),
+            duration=np.repeat(np.array([0.2]), args_cli.num_envs),
+        )
+        control_interface.call(
+            SimInterface.initiate_footstep,
+            mask=None,
+            leg=np.repeat(np.array([3]), args_cli.num_envs),
+            location_hip=np.repeat(
+                np.asarray([-0.1, -0.1])[None, :], args_cli.num_envs, axis=0
+            ),
+            duration=np.repeat(np.array([0.2]), args_cli.num_envs),
+        )
+    def step2():
+        control_interface.call(
+            SimInterface.initiate_footstep,
+            mask=None,
+            leg=np.repeat(np.array([1]), args_cli.num_envs),
+            location_hip=np.repeat(
+                np.asarray([0.1, -0.1])[None, :], args_cli.num_envs, axis=0
+            ),
+            duration=np.repeat(np.array([0.2]), args_cli.num_envs),
+        )
+        control_interface.call(
+            SimInterface.initiate_footstep,
+            mask=None,
+            leg=np.repeat(np.array([2]), args_cli.num_envs),
+            location_hip=np.repeat(
+                np.asarray([-0.1, 0.1])[None, :], args_cli.num_envs, axis=0
+            ),
+            duration=np.repeat(np.array([0.2]), args_cli.num_envs),
+        )
+    
+    cycle_length_s = 0.4
+    cycle_length_steps = int(100 * cycle_length_s)
+    # on the first count of the cycle do step 1, on the second half do step 2
+    if count % cycle_length_steps == 0:
+        step1()
+    elif count % cycle_length_steps == cycle_length_steps // 2:
+        step2()
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -182,7 +185,6 @@ def main():
         iterations_between_mpc=2,  # 50 Hz MPC
         debug_logging=False,
     )
-    step_state = False
 
     # simulate physics
     count = 0
@@ -191,7 +193,7 @@ def main():
         while simulation_app.is_running() and not shutdown_requested:  # Add flag check
             with torch.inference_mode():
 
-                step_state = walk_in_place(count, step_state, controllers)
+                walk_in_place(count, controllers)
                 command = np.zeros((args_cli.num_envs, 3), dtype=np.float32)
                 command[:, 0] = 0.3
                 command[:, 2] = 0.2

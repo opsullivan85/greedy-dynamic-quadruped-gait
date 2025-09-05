@@ -1,5 +1,7 @@
 import math
+
 # import isaaclab.envs.mdp as mdp  # type: ignore
+from isaaclab.envs.mdp import bad_orientation
 import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp  # type: ignore
 import torch
 from isaaclab.envs import ManagerBasedEnv  # type: ignore
@@ -98,25 +100,24 @@ class EventsCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.8, 0.8),
-            "dynamic_friction_range": (0.6, 0.6),
+            "static_friction_range": (1.0, 1.0),
+            "dynamic_friction_range": (0.9, 0.9),
             "restitution_range": (0.0, 0.0),
             "num_buckets": 64,
         },
     )
 
-    add_base_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
-            "mass_distribution_params": (-1.0, 3.0),
-            "operation": "add",
-        },
-    )
+    # add_base_mass = EventTerm(
+    #     func=mdp.randomize_rigid_body_mass,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
+    #         "mass_distribution_params": (-1.0, 3.0),
+    #         "operation": "add",
+    #     },
+    # )
 
     # on reset
-    # TODO: how do I also reset my controller here?
     base_external_force_torque = EventTerm(
         func=mdp.apply_external_force_torque,
         mode="reset",
@@ -143,30 +144,32 @@ class EventsCfg:
         },
     )
 
+    reset_robot_joints = EventTerm(
+        func=mdp.reset_joints_by_scale,
+        mode="reset",
+        params={
+            "position_range": (0.5, 0.5),
+            "velocity_range": (0.0, 0.0),
+        },
+    )
+
     reset_controllers = EventTerm(
         func=reset_controller,
         mode="reset",
     )
 
-    # TODO: figure out a way to initilize the controller
-    # state estimator
-    # reset_robot_joints = EventTerm(
-    #     func=mdp.reset_joints_by_scale,
-    #     mode="reset",
-    #     params={
-    #         "position_range": (1.0, 1.0),
-    #         "velocity_range": (0.0, 0.0),
-    #     },
-    # )
 
 @configclass
 class TerminationsCfg:
     """Termination terms for the MDP."""
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    base_contact = DoneTerm(
-        func=mdp.illegal_contact,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="trunk"), "threshold": 1.0},
+    bad_orientation = DoneTerm(
+        func=mdp.bad_orientation,
+        params={
+            "limit_angle": math.radians(20),
+            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
+        },
     )
 
 
