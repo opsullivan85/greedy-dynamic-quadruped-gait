@@ -25,8 +25,9 @@ import numpy as np
 import torch
 from isaaclab.utils import configclass  # type: ignore
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg  # type: ignore
-from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.scene import InteractiveScene
 import multiprocessing
+
 
 from src.simulation.cfg.manager_components import (
     ActionsCfg,
@@ -36,7 +37,7 @@ from src.simulation.cfg.manager_components import (
     TerminationsCfg,
 )
 from src.simulation.cfg.scene import SceneCfg
-from src.sim2real import SimInterface, VectObjectPool
+from src.sim2real import SimInterface, VectorPool
 from src.simulation.util import (
     interface_to_isaac_torques,
     isaac_body_to_interface,
@@ -59,6 +60,10 @@ class QuadrupedEnvCfg(ManagerBasedRLEnvCfg):
     terminations: TerminationsCfg = TerminationsCfg()
     rewards: RewardsCfg = RewardsCfg()
 
+    # controller
+    # we need this here so the events can access it to reset individual robots
+    controllers: VectorPool[SimInterface] | None = None
+
     def __post_init__(self):
         """Post initialization."""
         # general settings
@@ -77,11 +82,11 @@ class QuadrupedEnvCfg(ManagerBasedRLEnvCfg):
             self.scene.RL_foot_scanner,
             self.scene.RR_foot_scanner,
         ]:
-            scanner.update_period = self.decimation * self.sim.dt  # 50 Hz
+            scanner.update_period = self.decimation * self.sim.dt  # 100 Hz
 
 
 def controls_to_joint_efforts(
-    controls: np.ndarray, controllers: VectObjectPool, scene: InteractiveSceneCfg
+    controls: np.ndarray, controllers: VectorPool, scene: InteractiveScene
 ) -> torch.Tensor:
     joint_pos = scene["robot"].data.joint_pos.cpu().numpy()
     joint_vel = scene["robot"].data.joint_vel.cpu().numpy()
@@ -103,7 +108,7 @@ def controls_to_joint_efforts(
 
 
 def walk_in_place(
-    count: int, step_state: bool, control_interface: VectObjectPool
+    count: int, step_state: bool, control_interface: VectorPool
 ) -> bool:
     # step in place every 200ms
     if count % 20 == 0:
@@ -170,17 +175,19 @@ def main():
     env_cfg.sim.device = args_cli.device
     # setup RL environment
     env = ManagerBasedRLEnv(cfg=env_cfg)
-    make_controllers = lambda: VectObjectPool(
+    controllers = VectorPool(
         instances=args_cli.num_envs,
         cls=SimInterface,
-        dt=env_cfg.sim.dt * env_cfg.decimation,
+        dt=env_cfg.sim.dt * env_cfg.decimation,  # 100 Hz leg PD control
+        iterations_between_mpc=2,  # 50 Hz MPC
         debug_logging=False,
     )
     step_state = False
 
     # simulate physics
     count = 0
-    with make_controllers() as controllers:
+    with controllers:
+        env_cfg.controllers = controllers
         while simulation_app.is_running() and not shutdown_requested:  # Add flag check
             with torch.inference_mode():
 
@@ -197,6 +204,8 @@ def main():
 
                 # update counter
                 count += 1
+    env_cfg.controllers = None
+    del controllers
 
     # close the environment
     env.close()

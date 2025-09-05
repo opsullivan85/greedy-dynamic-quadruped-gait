@@ -31,7 +31,7 @@ class Message:
 T = TypeVar("T")
 
 
-class VectObjectPool(Generic[T]):
+class VectorPool(Generic[T]):
     """Provides a vectorized wrapper around a objects using multiprocessing.
 
     useful over a multiprocessing.Pool when the objects cannot be serialized
@@ -268,7 +268,7 @@ class VectObjectPool(Generic[T]):
         # gather results
         results = []
         for pipe in self.pipes:
-            batched_torques = VectObjectPool._expect_success(pipe)
+            batched_torques = VectorPool._expect_success(pipe)
             results.append(batched_torques)
 
         return np.concatenate(results)

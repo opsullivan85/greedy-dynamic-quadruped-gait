@@ -10,7 +10,7 @@ import numpy as np
 from nptyping import Float32, NDArray, Shape
 
 import src.sim2real.siminterface as SimInterface
-from src.sim2real import VectObjectPool
+from src.sim2real import VectorPool
 from src.simulation.util import (
     interface_to_isaac_torques,
     isaac_body_to_interface,
@@ -127,7 +127,7 @@ def test_mock_sim():
     sim = SimpleNamespace()
     sim.get_physics_dt = lambda: 0.05
 
-    control_interface = VectObjectPool(
+    control_interface = VectorPool(
         dt=sim.get_physics_dt(),
         instances=args_cli.num_envs,
         cls=SimInterface.SimInterface,

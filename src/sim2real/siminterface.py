@@ -10,13 +10,13 @@ logger = logging.getLogger(__name__)
 
 
 class SimInterface(Sim2RealInterface):
-    def __init__(self, dt: float, debug_logging: bool = False) -> None:
+    def __init__(self, dt: float, iterations_between_mpc: int = 1, debug_logging: bool = False) -> None:
         self.logger: None | logging.Logger = None
         if debug_logging:
             self.logger = logger
 
         self.robot_runner = RobotRunnerMin()
-        self.robot_runner.init(RobotType.GO1, dt=dt)
+        self.robot_runner.init(RobotType.GO1, dt=dt, iterations_between_mpc=iterations_between_mpc)
 
     # override
     def get_torques(

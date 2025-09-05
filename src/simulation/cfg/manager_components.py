@@ -11,6 +11,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm  # type: ignore
 from isaaclab.managers import SceneEntityCfg  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise  # type: ignore
+from src.simulation.cfg.events import reset_controller
 
 
 def constant_commands(env: ManagerBasedEnv) -> torch.Tensor:
@@ -132,14 +133,19 @@ class EventsCfg:
         params={
             "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
             "velocity_range": {
-                "x": (0.0, 1.0),
-                "y": (0.0, 1.0),
+                "x": (0.0, 0.0),
+                "y": (0.0, 0.0),
                 "z": (0.0, 0.0),
                 "roll": (0.0, 0.0),
                 "pitch": (0.0, 0.0),
                 "yaw": (0.0, 0.0),
             },
         },
+    )
+
+    reset_controllers = EventTerm(
+        func=reset_controller,
+        mode="reset",
     )
 
     # TODO: figure out a way to initilize the controller
