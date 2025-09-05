@@ -79,8 +79,7 @@ class ObservationsCfg:
             noise=Unoise(n_min=-0.1, n_max=0.1),
             clip=(-1.0, 1.0),
         )
-        # TODO: REMOVE THIS
-        time = ObsTerm(func=mdp.current_time_s)
+        # time = ObsTerm(func=mdp.current_time_s)
 
         def __post_init__(self):
             self.enable_corruption = True

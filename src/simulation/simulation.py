@@ -201,8 +201,6 @@ def main():
 
                 # step the environment
                 obs, rew, terminated, truncated, info = env.step(joint_efforts)
-                # TODO: remove time from observations
-                print(obs["policy"].cpu().numpy()[0,-1])
 
                 # update counter
                 count += 1
