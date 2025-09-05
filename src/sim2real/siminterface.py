@@ -3,20 +3,20 @@ import logging
 import numpy as np
 from nptyping import Float32, NDArray, Shape
 
-from src.control import RobotRunnerMin, RobotType
+from src.control import RobotRunnerMin, RobotType, mpc
 from src.sim2real.abstractinterface import Sim2RealInterface
 
 logger = logging.getLogger(__name__)
 
 
 class SimInterface(Sim2RealInterface):
-    def __init__(self, dt: float, debug_logging: bool = False) -> None:
+    def __init__(self, dt: float, iterations_between_mpc: int = 1, debug_logging: bool = False) -> None:
         self.logger: None | logging.Logger = None
         if debug_logging:
             self.logger = logger
 
         self.robot_runner = RobotRunnerMin()
-        self.robot_runner.init(RobotType.GO1, dt)
+        self.robot_runner.init(RobotType.GO1, dt=dt, iterations_between_mpc=iterations_between_mpc)
 
     # override
     def get_torques(
@@ -37,19 +37,14 @@ class SimInterface(Sim2RealInterface):
             # make each array print on the next line, with a tab indent
             formatter = "\n\t\t"
             with np.printoptions(precision=5, suppress=True):
-                joint_states_str = formatter + formatter.join(
-                    str(joint_states).split("\n")
+                logger.info(
+                    f"Contact states: {self.robot_runner.cMPC.gait.getContactPhase().flatten()}"
                 )
-                body_state_str = formatter + formatter.join(str(body_state).split("\n"))
-                command_str = formatter + formatter.join(str(command).split("\n"))
-                torques_str = formatter + formatter.join(str(torques).split("\n"))
-            self.logger.debug(
-                f"got torques\n"
-                f"\t- joint_states:{joint_states_str}\n"
-                f"\t- body_state:{body_state_str}\n"
-                f"\t- command:{command_str}\n"
-                f"\t- torques:{torques_str}"
-            )
+                logger.info(f"Swing phase: {self.robot_runner.cMPC.gait.getSwingPhase().flatten()}")
+                mpc_table = self.robot_runner.cMPC.gait.getMpcTable()
+                mpc_table = np.asarray(mpc_table).reshape((self.robot_runner.cMPC.horizon_length, -1))
+                logger.info(f"MPC table:\n{mpc_table}")
+                logger.info("")
 
         return torques_converted
 

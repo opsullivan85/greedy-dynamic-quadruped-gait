@@ -1,0 +1,39 @@
+import isaaclab.sim as sim_utils  # type: ignore
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg  # type: ignore
+from isaaclab.scene import InteractiveSceneCfg  # type: ignore
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg  # type: ignore
+from isaaclab.utils import configclass  # type: ignore
+
+from src.simulation.cfg.footstep_scanner import (
+    FL_FootstepScannerCfg,
+    FR_FootstepScannerCfg,
+    RL_FootstepScannerCfg,
+    RR_FootstepScannerCfg,
+)
+from src.simulation.cfg.robot import ROBOT_CFG
+from src.simulation.cfg.terrain import VoidTerrainImporterCfg
+
+
+@configclass
+class SceneCfg(InteractiveSceneCfg):
+    """Design the scene with sensors on the robot."""
+
+    terrain = VoidTerrainImporterCfg()
+
+    robot: ArticulationCfg = ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+    FR_foot_scanner: RayCasterCfg = FR_FootstepScannerCfg()
+    FL_foot_scanner: RayCasterCfg = FL_FootstepScannerCfg()
+    RL_foot_scanner: RayCasterCfg = RL_FootstepScannerCfg()
+    RR_foot_scanner: RayCasterCfg = RR_FootstepScannerCfg()
+
+    contact_forces = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/trunk",
+        update_period=0.0,
+        debug_vis=True,
+    )
+
+    light = AssetBaseCfg(
+        prim_path="/World/Light",
+        spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75)),
+    )

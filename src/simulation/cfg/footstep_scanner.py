@@ -2,6 +2,7 @@ from typing import Callable
 
 from isaaclab.sensors import RayCasterCfg, patterns  # type: ignore
 
+
 _hip_names = ["FR_hip", "FL_hip", "RL_hip", "RR_hip"]
 
 # Distance between rays in the grid and overall grid size
@@ -38,7 +39,7 @@ _height_scanner_settings = {
             ],
         ),
         "debug_vis": True,
-        "mesh_prim_paths": ["/World/defaultGroundPlane"],
+        "mesh_prim_paths": ["/World/ground"],
     }
     for hip_name in _hip_names
 }
