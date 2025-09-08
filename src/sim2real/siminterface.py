@@ -15,8 +15,11 @@ class SimInterface(Sim2RealInterface):
         if debug_logging:
             self.logger = logger
 
-        self.robot_runner = RobotRunnerMin()
-        self.robot_runner.init(RobotType.GO1, dt=dt, iterations_between_mpc=iterations_between_mpc)
+        self._dt = dt
+        self._iterations_between_mpc = iterations_between_mpc
+        # initialize the robot runner
+        self.robot_runner: RobotRunnerMin
+        self.reset()
 
     # override
     def get_torques(
@@ -50,7 +53,10 @@ class SimInterface(Sim2RealInterface):
 
     # override
     def reset(self) -> None:
-        self.robot_runner.reset()
+        # TODO: find out why robot_runner.reset() causes issues
+        self.robot_runner = RobotRunnerMin()
+        self.robot_runner.init(RobotType.GO1, dt=self._dt, iterations_between_mpc=self._iterations_between_mpc)
+        # self.robot_runner.reset()
 
     @staticmethod
     def _convert_joint_states(

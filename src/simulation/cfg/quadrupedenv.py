@@ -1,0 +1,70 @@
+import logging
+
+from isaaclab.envs import ManagerBasedRLEnvCfg  # type: ignore
+from isaaclab.utils import configclass  # type: ignore
+
+from src.sim2real import SimInterface, VectorPool
+from src.simulation.cfg.manager_components import (
+    ActionsCfg,
+    EventsCfg,
+    ObservationsCfg,
+    RewardsCfg,
+    TerminationsCfg,
+)
+from src.simulation.cfg.scene import SceneCfg
+
+logger = logging.getLogger(__name__)
+
+
+@configclass
+class QuadrupedEnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for the locomotion velocity-tracking environment."""
+
+    # Scene settings
+    scene: SceneCfg = SceneCfg(env_spacing=2.5)  # type: ignore
+    # Basic settings
+    observations: ObservationsCfg = ObservationsCfg()  # type: ignore
+    actions: ActionsCfg = ActionsCfg()  # type: ignore
+    events: EventsCfg = EventsCfg()  # type: ignore
+    terminations: TerminationsCfg = TerminationsCfg()  # type: ignore
+    rewards: RewardsCfg = RewardsCfg()  # type: ignore
+
+    # controller
+    # we need this here so the events can access it to reset individual robots
+    controllers: VectorPool[SimInterface] | None = None
+
+    def __post_init__(self):
+        """Post initialization."""
+        # general settings
+        self.decimation = 2  # env decimation -> 100 Hz control
+        self.render_interval = self.decimation  # render at control rate
+        # simulation settings
+        self.sim.dt = 0.005  # simulation timestep -> 200 Hz physics
+        self.sim.physics_material = self.scene.terrain.physics_material
+
+        self.episode_length_s = 5
+
+
+def get_quadruped_env_cfg(num_envs: int, device: str) -> QuadrupedEnvCfg:
+    """Get the quadruped environment configuration.
+
+    Args:
+        num_envs (int): Number of environments.
+        device (str): Device to use.
+
+    Returns:
+        QuadrupedEnvCfg: The quadruped environment configuration.
+    """
+    cfg = QuadrupedEnvCfg()
+    cfg.scene.num_envs = num_envs
+    cfg.sim.device = device
+    # update sensor update periods
+    # we tick all the sensors based on the smallest update period (physics update period)
+    for scanner in [
+        cfg.scene.FR_foot_scanner,
+        cfg.scene.FL_foot_scanner,
+        cfg.scene.RL_foot_scanner,
+        cfg.scene.RR_foot_scanner,
+    ]:
+        scanner.update_period = cfg.decimation * cfg.sim.dt  # 100 Hz
+    return cfg
