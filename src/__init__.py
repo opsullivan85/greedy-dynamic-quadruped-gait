@@ -97,5 +97,8 @@ while len(log_files) >= max_logs:
         logger.debug(f"deleted old log file: {oldest}")
     except Exception as e:
         logger.debug(f"failed to delete {oldest}: {e}")
+    del oldest
+
+del ch, fh, max_logs, launch_str, log_files, log_dir, ProjectRelativeFormatter, AlignedFormatter, datetime, Path, sys, logging
 
 logger.debug("initialized")

@@ -43,6 +43,7 @@ from src.simulation.util import (
     isaac_body_to_interface,
     isaac_joints_to_interface,
 )
+from src.util.data_logging import data_logger
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ class QuadrupedEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # general settings
         self.decimation = 2  # env decimation -> 100 Hz control
+        self.render_interval = self.decimation  # render at control rate
         # simulation settings
         self.sim.dt = 0.005  # simulation timestep -> 200 Hz physics
         self.sim.physics_material = self.scene.terrain.physics_material
@@ -178,12 +180,18 @@ def main():
     env_cfg.sim.device = args_cli.device
     # setup RL environment
     env = ManagerBasedRLEnv(cfg=env_cfg)
+    iterations_between_mpc = 2  # 50 Hz MPC
     controllers = VectorPool(
         instances=args_cli.num_envs,
         cls=SimInterface,
         dt=env_cfg.sim.dt * env_cfg.decimation,  # 100 Hz leg PD control
-        iterations_between_mpc=2,  # 50 Hz MPC
+        iterations_between_mpc=iterations_between_mpc,
         debug_logging=False,
+    )
+    data_logger.set_dt(
+        sim_dt=env_cfg.sim.dt,
+        control_dt=env_cfg.sim.dt * env_cfg.decimation,
+        mpc_dt=env_cfg.sim.dt * env_cfg.decimation * iterations_between_mpc,
     )
 
     # simulate physics
@@ -200,7 +208,10 @@ def main():
                 joint_efforts = controls_to_joint_efforts(command, controllers, env.scene)
 
                 # step the environment
-                obs, rew, terminated, truncated, info = env.step(joint_efforts)
+                obs, rew, terminated, truncated, info = env.step(joint_efforts)  # type: ignore
+                obs: dict[str, dict[str, torch.Tensor]] = obs
+                # print(f"{obs['policy'].keys() = }, {rew = }, {terminated = }, {truncated = }, {info = }")
+                data_logger.log(obs["policy"])
 
                 # update counter
                 count += 1
