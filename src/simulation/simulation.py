@@ -150,6 +150,8 @@ def main():
                     joint_vel_isaac = env.scene["robot"].data.joint_vel[0]
                     body_state_isaac = env.scene["robot"].data.root_state_w[0]
 
+                    height_scanner = env.scene["FR_foot_scanner"]
+
                     reset_all_to(env, joint_pos_isaac, joint_vel_isaac, body_state_isaac)
                     logger.info("Reset all to robot 0 state.")
 

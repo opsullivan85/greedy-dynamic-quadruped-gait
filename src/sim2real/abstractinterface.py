@@ -54,6 +54,7 @@ class Sim2RealInterface(ABC):
 
         Args:
             leg (int): Index of the leg (0-3)
+                in FR, FL, RR, RL order
             location_hip (NDArray[Shape["2"], Float32]): Desired foot position in the respective hip frame (x, y)
                 This position is relative to the hip of the specified leg.
                 z will be projected down to zero.
