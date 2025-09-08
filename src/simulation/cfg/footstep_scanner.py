@@ -6,7 +6,7 @@ from isaaclab.sensors import RayCasterCfg, patterns  # type: ignore
 _hip_names = ["FR_hip", "FL_hip", "RL_hip", "RR_hip"]
 
 # Distance between rays in the grid and overall grid size
-grid_resolution = 0.075
+grid_resolution = 0.050
 # Odd numbers will be centered on the _stable_footstep_offset
 grid_size = (5, 5)
 
