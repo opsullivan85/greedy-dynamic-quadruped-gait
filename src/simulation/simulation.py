@@ -3,9 +3,6 @@ import signal
 
 from isaaclab.app import AppLauncher
 
-from isaaclab.envs import ManagerBasedRLEnv
-from src.simulation.cfg.quadrupedenv import get_quadruped_env_cfg
-
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a robot.")
 parser.add_argument(
@@ -28,9 +25,12 @@ import multiprocessing
 import numpy as np
 import torch
 
+from isaaclab.envs import ManagerBasedRLEnv
+
 from src.sim2real import SimInterface, VectorPool
 from src.simulation.util import controls_to_joint_efforts, reset_all_to
 from src.util.data_logging import data_logger
+from src.simulation.cfg.quadrupedenv import QuadrupedEnvCfg, get_quadruped_env_cfg
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ signal.signal(signal.SIGINT, signal_handler)
 def main():
     """Main function."""
     # create environment configuration
-    env_cfg = get_quadruped_env_cfg(args_cli.num_envs, args_cli.device)
+    env_cfg: QuadrupedEnvCfg = get_quadruped_env_cfg(args_cli.num_envs, args_cli.device)
     # setup RL environment
     env = ManagerBasedRLEnv(cfg=env_cfg)
     iterations_between_mpc = 2  # 50 Hz MPC
@@ -144,9 +144,11 @@ def main():
 
                 if count % 100 == 0:
                     # set state of all to robot 1
-                    joint_pos_isaac = obs["robot_state"]["joint_pos"].cpu().numpy()[0]
-                    joint_vel_isaac = obs["robot_state"]["joint_vel"].cpu().numpy()[0]
-                    body_state_isaac = obs["robot_state"]["body_state"].cpu().numpy()[0]
+                    
+                    # get state from env
+                    joint_pos_isaac = env.scene["robot"].data.joint_pos[0]
+                    joint_vel_isaac = env.scene["robot"].data.joint_vel[0]
+                    body_state_isaac = env.scene["robot"].data.root_state_w[0]
 
                     reset_all_to(env, joint_pos_isaac, joint_vel_isaac, body_state_isaac)
                     logger.info("Reset all to robot 0 state.")

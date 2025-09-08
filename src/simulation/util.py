@@ -2,6 +2,7 @@ import numpy as np
 import torch
 
 from isaaclab.envs import ManagerBasedEnv
+from isaaclab.envs.mdp import joint_pos
 from isaaclab.scene import InteractiveScene
 from src.sim2real import SimInterface
 from src.util.vectorpool import VectorPool
@@ -105,41 +106,48 @@ def controls_to_joint_efforts(
     return torques_isaac
 
 
+def _ensure_shape(arr: torch.Tensor, expected_shape: tuple):
+    if arr.shape == expected_shape[1:]:
+        return arr.expand(expected_shape[0], -1)
+    elif arr.shape == expected_shape:
+        return arr
+    else:
+        raise ValueError(
+            f"Array must have shape {expected_shape[1:],} or {expected_shape}, got {arr.shape}"
+        )
+
+
 def reset_all_to(
     env: ManagerBasedEnv,
-    joint_pos_isaac: np.ndarray,
-    joint_vel_isaac: np.ndarray,
-    body_state_isaac: np.ndarray,
+    joint_pos_isaac: torch.Tensor,
+    joint_vel_isaac: torch.Tensor,
+    body_state_isaac: torch.Tensor,
 ):
     """
     Reset all environments in the ManagerBasedEnv to the specified joint positions, velocities, and body states.
 
     Parameters:
     - env: ManagerBasedEnv instance
-    - joint_pos_isaac: np.ndarray of shape (num_envs, 12), or if shape (12,), will be broadcasted
-    - joint_vel_isaac: np.ndarray of shape (num_envs, 12), or if shape (12,), will be broadcasted
-    - body_state_isaac: np.ndarray of shape (num_envs, 13), or if shape (13,), will be broadcasted
+    - joint_pos_isaac: torch.Tensor of shape (num_envs, 12), or if shape (12,), will be broadcasted
+    - joint_vel_isaac: torch.Tensor of shape (num_envs, 12), or if shape (12,), will be broadcasted
+    - body_state_isaac: torch.Tensor of shape (num_envs, 13), or if shape (13,), will be broadcasted
     """
-    # broadcast vars
-    num_envs = env.num_envs
-    vars = {
-        "joint_pos_isaac": (12, joint_pos_isaac),
-        "joint_vel_isaac": (12, joint_vel_isaac),
-        "body_state_isaac": (13, body_state_isaac),
-    }
-    for var_name, (expected_dim, var_value) in vars.items():
-        if var_value.shape == (expected_dim,):
-            var_value = np.tile(var_value, (num_envs, 1))
-        elif var_value.shape != (num_envs, expected_dim):
-            raise ValueError(
-                f"{var_name} must have shape ({expected_dim},) or ({num_envs}, {expected_dim})"
-            )
+    joint_pos_isaac = _ensure_shape(joint_pos_isaac, (env.num_envs, 12))
+    joint_vel_isaac = _ensure_shape(joint_vel_isaac, (env.num_envs, 12))
+    body_state_isaac = _ensure_shape(body_state_isaac, (env.num_envs, 13)) 
 
     # Reset the environments
     env.reset()
+
+    # make sure controller is there
+    if not hasattr(env.cfg, "controllers"):
+        raise AttributeError("The env cfg does not have a controllers field.")
+    if env.cfg.controllers is None:  # type: ignore
+        raise ValueError("The env cfg controllers field is None.")
+    
     # TODO: I'm 50% sure that we can just reset the controllers without
     # manually initializing the state. There may be issues with the contact history in the state estimator.
-    controllers: VectorPool[SimInterface] = env.scene["robot"].controllers
+    controllers: VectorPool[SimInterface] = env.cfg.controllers  # type: ignore
     controllers.call(
         SimInterface.reset,
         mask=None,
@@ -151,3 +159,12 @@ def reset_all_to(
 
     # update joint state
     env.scene["robot"].write_joint_state_to_sim(joint_pos_isaac, joint_vel_isaac)
+
+    # reset forces and torques
+    env.scene["robot"].set_external_force_and_torque(
+        torch.zeros((env.num_envs, env.scene["robot"].num_bodies, 3), device=env.scene.device),
+        torch.zeros((env.num_envs, env.scene["robot"].num_bodies, 3), device=env.scene.device),
+    )
+
+    # write the changes to the simulator
+    env.scene["robot"].write_data_to_sim()
