@@ -2,7 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 
 import numpy as np
-from nptyping import Float32, NDArray, Shape
+from nptyping import Float32, NDArray, Shape, Bool
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +59,26 @@ class Sim2RealInterface(ABC):
                 z will be projected down to zero.
             duration (float): Duration of the footstep
         """
-        ...
+        pass
 
     @abstractmethod
-    def reset(self) -> None:
-        """Resets the robot
+    def get_contact_state(self) -> NDArray[Shape["4"], Bool]:
+        """Get the contact states of the feet.
+
+        Returns:
+            np.ndarray: (4,) boolean array indicating contact state of each foot
+                index 0: leg index (0-3)
+                True if in contact, False otherwise
+        """
+        pass
+
+    @abstractmethod
+    def get_swing_phase(self) -> NDArray[Shape["4"], Float32]:
+        """Get the swing phase of each leg.
+
+        Returns:
+            np.ndarray: (4,) float32 array indicating swing phase of each leg
+                index 0: leg index (0-3)
+                value in [0, 1], where 0 is the start of swing and 1 is the end of swing
         """
         pass

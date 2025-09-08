@@ -1,7 +1,7 @@
 import logging
 
 import numpy as np
-from nptyping import Float32, NDArray, Shape
+from nptyping import Float32, NDArray, Shape, Bool
 
 from src.control import RobotRunnerMin, RobotType, mpc
 from src.sim2real.abstractinterface import Sim2RealInterface
@@ -10,7 +10,9 @@ logger = logging.getLogger(__name__)
 
 
 class SimInterface(Sim2RealInterface):
-    def __init__(self, dt: float, iterations_between_mpc: int = 1, debug_logging: bool = False) -> None:
+    def __init__(
+        self, dt: float, iterations_between_mpc: int = 1, debug_logging: bool = False
+    ) -> None:
         self.logger: None | logging.Logger = None
         if debug_logging:
             self.logger = logger
@@ -43,26 +45,34 @@ class SimInterface(Sim2RealInterface):
                 logger.info(
                     f"Contact states: {self.robot_runner.cMPC.gait.getContactPhase().flatten()}"
                 )
-                logger.info(f"Swing phase: {self.robot_runner.cMPC.gait.getSwingPhase().flatten()}")
+                logger.info(
+                    f"Swing phase: {self.robot_runner.cMPC.gait.getSwingPhase().flatten()}"
+                )
                 mpc_table = self.robot_runner.cMPC.gait.getMpcTable()
-                mpc_table = np.asarray(mpc_table).reshape((self.robot_runner.cMPC.horizon_length, -1))
+                mpc_table = np.asarray(mpc_table).reshape(
+                    (self.robot_runner.cMPC.horizon_length, -1)
+                )
                 logger.info(f"MPC table:\n{mpc_table}")
                 logger.info("")
 
         return torques_converted
 
-    # override
     def reset(self) -> None:
+        """Resets the robot"""
         # TODO: find out why robot_runner.reset() causes issues
         self.robot_runner = RobotRunnerMin()
-        self.robot_runner.init(RobotType.GO1, dt=self._dt, iterations_between_mpc=self._iterations_between_mpc)
+        self.robot_runner.init(
+            RobotType.GO1,
+            dt=self._dt,
+            iterations_between_mpc=self._iterations_between_mpc,
+        )
         # self.robot_runner.reset()
 
     @staticmethod
     def _convert_joint_states(
         joint_states_interface: NDArray[Shape["4, 3, 2"], Float32],
     ) -> NDArray[Shape["12, 2"], Float32]:
-        """_summary_
+        """Convert joint states from interface order to control order.
 
         Args:
             joint_states_interface (np.ndarray): (4, 3, 2) joint states in interface order
@@ -86,7 +96,7 @@ class SimInterface(Sim2RealInterface):
     def _convert_torques(
         torques_control: NDArray[Shape["12"], Float32],
     ) -> NDArray[Shape["4, 3"], Float32]:
-        """_summary_
+        """Convert torques from control order to interface order.
 
         Args:
             torques_control (np.ndarray): (12,) torques in control order
@@ -104,7 +114,7 @@ class SimInterface(Sim2RealInterface):
                 index 1: joint index (0-2) (hip, upper leg, lower leg)
         """
         return torques_control.reshape((4, 3))
-    
+
     # override
     def initiate_footstep(
         self,
@@ -112,17 +122,12 @@ class SimInterface(Sim2RealInterface):
         location_hip: NDArray[Shape["2"], Float32],
         duration: float,
     ):
-        """initiates a footstep for the specified leg at the specified location
+        self.robot_runner.cMPC.initiate_footstep(leg, location_hip, duration)
 
-        Args:
-            leg (int): Index of the leg (0-3)
-            location_hip (NDArray[Shape["2"], Float32]): Desired foot position in the respective hip frame (x, y)
-                This position is relative to the hip of the specified leg.
-                z will be projected down to zero.
-            duration (float): Duration of the footstep
-        """
-        self.robot_runner.cMPC.initiate_footstep(
-            leg,
-            location_hip,
-            duration
-        )
+    # override
+    def get_contact_state(self) -> NDArray[Shape["4"], Bool]:
+        return self.robot_runner.cMPC.gait.getContactPhase().flatten().astype(bool)
+
+    # override
+    def get_swing_phase(self) -> NDArray[Shape["4"], Float32]:
+        return self.robot_runner.cMPC.gait.getSwingPhase().flatten()
