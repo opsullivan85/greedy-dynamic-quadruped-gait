@@ -200,7 +200,9 @@ def main():
                 joint_efforts = controls_to_joint_efforts(command, controllers, env.scene)
 
                 # step the environment
-                obs, rew, terminated, truncated, info = env.step(joint_efforts)
+                obs, rew, terminated, truncated, info = env.step(joint_efforts)  # type: ignore
+                obs: dict[str, dict[str, torch.Tensor]] = obs
+                print(f"{obs['policy'].keys() = }, {rew = }, {terminated = }, {truncated = }, {info = }")
 
                 # update counter
                 count += 1

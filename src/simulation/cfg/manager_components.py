@@ -82,8 +82,8 @@ class ObservationsCfg:
         # time = ObsTerm(func=mdp.current_time_s)
 
         def __post_init__(self):
-            self.enable_corruption = True
-            self.concatenate_terms = True
+            self.enable_corruption = False
+            self.concatenate_terms = False
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
