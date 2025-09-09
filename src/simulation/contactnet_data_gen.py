@@ -1,6 +1,5 @@
 import argparse
 import signal
-from tkinter import N
 
 from isaaclab.app import AppLauncher
 
@@ -55,7 +54,8 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 
-@dataclass
+# frozen allows for hashing
+@dataclass(frozen=True)
 class IsaacState:
     """Class for keeping track of an Isaac state."""
 
@@ -89,20 +89,43 @@ def get_step_locations_hip() -> NDArray[Shape["4, N, M ,2"], Float32]:
     return legs.astype(np.float32)
 
 
-def check_dones(obs: dict[str, dict[str, torch.Tensor]]) -> NDArray[Shape["*"], Bool]:
+def check_dones(
+    env: ManagerBasedEnv, obs: dict[str, dict[str, torch.Tensor]]
+) -> tuple[NDArray[Shape["*"], Bool], np.ndarray]:
     """Check which footstep positions are done.
 
     Args:
+        env (ManagerBasedEnv): The environment to check the dones from.
         obs (dict): The observation from the environment step.
 
     Returns:
         np.ndarray: Array of booleans indicating which footstep positions are done.
             (4*N*M) where n and m are the number of footstep positions.
             in FL, FR, RL, RR order.
+        np.ndarray: State of the done robots
     """
-    # TODO: implement
-    N, M = fs.grid_size
-    return np.zeros((4 * N * M,), dtype=bool)
+    controllers: VectorPool[SimInterface] = env.cfg.controllers  # type: ignore
+    contact_states = controllers.call(
+        SimInterface.get_contact_state,
+        mask=None,
+    )
+    done_state = np.asarray((1, 1, 1, 1), dtype=bool)
+    dones = np.all(contact_states == done_state, axis=1)
+
+    states = np.full((env.num_envs,), None, dtype=object)
+    indices = np.argwhere(dones)
+    for index in indices:
+        i = index[0]
+        states[i] = IsaacState(
+            env.scene["robot"].data.joint_pos[i],
+            env.scene["robot"].data.joint_vel[i],
+            env.scene["robot"].data.root_state_w[i],
+        )
+    return dones, states
+
+    # # TODO: implement
+    # N, M = fs.grid_size
+    # return np.zeros((4 * N * M,), dtype=bool)
 
 
 def get_cost(an_obs: dict[str, torch.Tensor]) -> float:
@@ -115,19 +138,22 @@ def get_cost(an_obs: dict[str, torch.Tensor]) -> float:
         float: The cost for the footstep position.
     """
     # TODO: implement
-    return 0.0
+    return -1.0
 
 
 def update_costs(
     step_cost_map: StepCostMap,
     dones: NDArray[Shape["*"], Bool],
-    obs: dict[str, dict[str, torch.Tensor]]
-) -> tuple[StepCostMap, NDArray[Shape["*"], Bool]]:
+    done_states: np.ndarray,
+    env: ManagerBasedEnv,
+    obs: dict[str, dict[str, torch.Tensor]],
+) -> tuple[StepCostMap, NDArray[Shape["*"], Bool], np.ndarray]:
     """Update the costs for the footstep positions that are done.
 
     Args:
         step_cost_map (StepCostMap): Current cost map.
         dones (NDArray[Shape["*"], Bool]): Current done map.
+        done_states (np.ndarray): Current done states.
         env (ManagerBasedEnv): The environment to get the rewards from.
         obs (dict): The observations from the environment step.
 
@@ -135,20 +161,22 @@ def update_costs(
         StepCostMap: Updated cost map.
         NDArray[Shape["*"], Bool]: Updated done map.
     """
-    currently_done = check_dones(obs)
+    currently_done, currently_done_states = check_dones(env, obs)
     newly_done = np.logical_and(currently_done, np.logical_not(dones))
     for idx in np.argwhere(newly_done):
-        an_obs = {k: v[idx] for k, v in obs.items()}
+        an_obs = {k: v[idx] for k, v in obs["policy"].items()}
         cost = get_cost(an_obs)
         step_cost_map[idx] = cost
     all_dones = np.logical_or(dones, currently_done)
-    return step_cost_map, all_dones
+    done_states[newly_done] = currently_done_states[newly_done]
+    return step_cost_map, all_dones, done_states
+
 
 def get_step_cost_map(
     env: ManagerBasedEnv,
     control: np.ndarray,
     state: IsaacState,
-) -> StepCostMap:
+) -> tuple[StepCostMap, np.ndarray]:
     """Evaluates an instance
 
     An instance consists of a starting state and a control input.
@@ -164,6 +192,8 @@ def get_step_cost_map(
 
     Returns:
         StepCostMap: Costs for each footstep position.
+        np.ndarray: States for each footstep position if done, else None.
+            Note: I'm pretty sure these will never be none, not 100% though
     """
     N, M = fs.grid_size
     controllers: VectorPool[SimInterface] = env.cfg.controllers  # type: ignore
@@ -185,30 +215,34 @@ def get_step_cost_map(
     # send all footstep commands
     controllers.call(
         SimInterface.initiate_footstep,
-        mask = None,
-        leg = legs,
-        location_hip = locations,
-        duration = durations,
+        mask=None,
+        leg=legs,
+        location_hip=locations,
+        duration=durations,
     )
 
     control_vect = np.tile(control, (env.num_envs, 1))
 
     step_cost_map = np.zeros((4 * N * M,), dtype=np.float32)
     dones = np.zeros((4 * N * M,), dtype=bool)
+    done_states = np.full((4 * N * M,), None, dtype=object)
 
-    while True:
+    while simulation_app.is_running() and not shutdown_requested:  # Add flag check
         joint_efforts = controls_to_joint_efforts(control_vect, controllers, env.scene)
 
         # step the environment
         obs, _ = env.step(joint_efforts)  # type: ignore
         obs: dict[str, dict[str, torch.Tensor]] = obs
 
-        step_cost_map, dones = update_costs(step_cost_map, dones, obs)
+        step_cost_map, dones, done_states = update_costs(
+            step_cost_map, dones, done_states, env, obs
+        )
         if np.all(dones):
             break
 
     step_cost_map = step_cost_map.reshape((4, N, M))
-    return step_cost_map
+    done_states = done_states.reshape((4, N, M))
+    return step_cost_map, done_states
 
 
 def main():
@@ -228,21 +262,32 @@ def main():
         debug_logging=False,
     )
 
+    state_cost_map: dict[IsaacState, StepCostMap] = {}
+
+    start_state: IsaacState = IsaacState(
+        env.scene["robot"].data.joint_pos[0],
+        env.scene["robot"].data.joint_vel[0],
+        env.scene["robot"].data.root_state_w[0],
+    )
+
     # simulate physics
     with controllers, torch.inference_mode():
         env_cfg.controllers = controllers
         while simulation_app.is_running() and not shutdown_requested:  # Add flag check
-            # TODO: add in queue of states to explore
-            state: IsaacState = IsaacState(
-                joint_pos=torch.zeros((num_envs, 12), device=args_cli.device),
-                joint_vel=torch.zeros((num_envs, 12), device=args_cli.device),
-                body_state=torch.zeros((num_envs, 13), device=args_cli.device),
-            )
-            get_step_cost_map(
+            # grab initial state from robot 0
+            cost_map, terminal_states = get_step_cost_map(
                 env,
-                control=np.zeros((num_envs, 3), dtype=np.float32),
-                state=state,
+                control=np.zeros((3,), dtype=np.float32),
+                state=start_state,
             )
+            state_cost_map[start_state] = cost_map
+
+            # pick new start state from one of the 10 lowest cost terminal states
+            flat_cost_map = cost_map.flatten()
+            lowest_indices = np.argpartition(flat_cost_map, 10)[:10]
+            chosen_index = np.random.choice(lowest_indices)
+            # the terminal states array is technically of IsaacStates
+            start_state = terminal_states.flatten()[chosen_index]  # type: ignore
 
     env_cfg.controllers = None
     del controllers

@@ -113,7 +113,7 @@ def _ensure_shape(arr: torch.Tensor, expected_shape: tuple):
         return arr
     else:
         raise ValueError(
-            f"Array must have shape {expected_shape[1:],} or {expected_shape}, got {arr.shape}"
+            f"Array must have shape {expected_shape[1:]} or {expected_shape}, got {arr.shape}"
         )
 
 
