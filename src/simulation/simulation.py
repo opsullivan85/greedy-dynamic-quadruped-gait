@@ -161,9 +161,9 @@ def main():
                 logger.info("Reset all to robot 0 state.")
 
                 # step the enviornment a few times to make sure the feet are in contact
-                for _ in range(50):
-                    zero_efforts = torch.zeros_like(joint_efforts)
-                    _ = env.step(zero_efforts)
+                # for _ in range(50):
+                #     zero_efforts = torch.zeros_like(joint_efforts)
+                #     _ = env.step(zero_efforts)
 
             # update counter
             count += 1

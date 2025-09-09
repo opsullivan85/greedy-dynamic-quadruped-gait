@@ -286,11 +286,11 @@ def main():
     env_cfg: QuadrupedEnvCfg = get_quadruped_env_cfg(num_envs, args_cli.device)
     # setup RL environment
     env = ManagerBasedEnv(cfg=env_cfg)
-    iterations_between_mpc = 2  # 50 Hz MPC
+    iterations_between_mpc = 10  # 50 Hz MPC
     controllers = VectorPool(
         instances=num_envs,
         cls=SimInterface,
-        dt=env_cfg.sim.dt * env_cfg.decimation,  # 100 Hz leg PD control
+        dt=env_cfg.sim.dt * env_cfg.decimation,  # 500 Hz leg PD control
         iterations_between_mpc=iterations_between_mpc,
         debug_logging=False,
     )
@@ -302,6 +302,11 @@ def main():
         env.scene["robot"].data.joint_vel[0],
         env.scene["robot"].data.root_state_w[0],
     )
+
+    # # let robot settle into more natural pose
+    # for _ in range(50):
+    #     zero_efforts = torch.zeros((num_envs, 12), device=env.scene.device)
+    #     _ = env.step(zero_efforts)
 
     # simulate physics
     with controllers, torch.inference_mode():
@@ -324,10 +329,10 @@ def main():
             state: IsaacStateCPU = terminal_states.flatten()[chosen_index]  # type: ignore
             start_state = state.to_torch(env.scene.device)
 
-            if args_cli.debug:
-                view_footstep_cost_map(
-                    cost_map, np.unravel_index(chosen_index, cost_map.shape)
-                )
+            # if args_cli.debug:
+            #     view_footstep_cost_map(
+            #         cost_map, np.unravel_index(chosen_index, cost_map.shape)
+            #     )
 
     env_cfg.controllers = None
     del controllers
