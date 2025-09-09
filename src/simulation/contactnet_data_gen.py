@@ -9,6 +9,7 @@ parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a ro
 # parser.add_argument(
 #     "--num_envs", type=int, default=1, help="Number of environments to spawn."
 # )
+parser.add_argument("--debug", action="store_true", help="Enable debug views.")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -29,12 +30,14 @@ from dataclasses import dataclass
 from typing import Any, TypeAlias
 
 from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
+from isaaclab.envs.mdp import rewards
 
 from src.sim2real import SimInterface, VectorPool
 from src.simulation.util import controls_to_joint_efforts, reset_all_to
 from src.util.data_logging import data_logger
 from src.simulation.cfg.quadrupedenv import QuadrupedEnvCfg, get_quadruped_env_cfg
 import src.simulation.cfg.footstep_scanner as fs
+from src.simulation.debug import view_footstep_cost_map
 from nptyping import Float32, NDArray, Shape, Bool
 
 logger = logging.getLogger(__name__)
@@ -72,6 +75,7 @@ class IsaacStateCPU:
             body_state=torch.from_numpy(self.body_state).to(device),
         )
 
+
 @dataclass()
 class IsaacStateTorch:
     """Class for keeping track of an Isaac state."""
@@ -87,10 +91,6 @@ class IsaacStateTorch:
             joint_vel=self.joint_vel.cpu().numpy(),
             body_state=self.body_state.cpu().numpy(),
         )
-
-
-StepCostMap: TypeAlias = np.ndarray
-"""(4 * n * m,) where n and m are the number of footstep positions"""
 
 
 def get_step_locations_hip() -> NDArray[Shape["4, N, M ,2"], Float32]:
@@ -153,45 +153,52 @@ def check_dones(
     # return np.zeros((4 * N * M,), dtype=bool)
 
 
-def get_cost(an_obs: dict[str, torch.Tensor]) -> float:
+def get_costs(env: ManagerBasedEnv) -> NDArray[Shape["*"], Float32]:
     """Get the cost for a footstep position.
 
     Args:
-        an_obs (dict): The observation from the environment step.
+        env (ManagerBasedEnv): The environment to get the costs from.
 
     Returns:
-        float: The cost for the footstep position.
+        np.ndarray: Array of costs for each footstep position.
     """
-    # TODO: implement
-    return -1.0
+    # TODO: add in:
+    # - foot position errors (to avoid slipping)
+    # - support polygon stability (to avoid falling)
+    costs = torch.zeros((env.num_envs,), device=env.scene.device)
+    costs += 2.0 * rewards.lin_vel_z_l2(env)  # type: ignore
+    costs += 0.05 * rewards.ang_vel_xy_l2(env)  # type: ignore
+    costs += 1.0e-5 * rewards.joint_torques_l2(env)  # type: ignore
+    costs += 2.5e-7 * rewards.joint_acc_l2(env)  # type: ignore
+    # move costs to cpu
+    costs = costs.cpu().numpy()
+    return costs
 
 
 def update_costs(
-    step_cost_map: StepCostMap,
+    step_cost_map: NDArray[Shape["*"], Float32],
     dones: NDArray[Shape["*"], Bool],
     done_states: np.ndarray,
     env: ManagerBasedEnv,
     obs: dict[str, dict[str, torch.Tensor]],
-) -> tuple[StepCostMap, NDArray[Shape["*"], Bool], np.ndarray]:
+) -> tuple[NDArray[Shape["4, N, M"], Float32], NDArray[Shape["*"], Bool], np.ndarray]:
     """Update the costs for the footstep positions that are done.
 
     Args:
-        step_cost_map (StepCostMap): Current cost map.
+        step_cost_map (NDArray[Shape["*"], Float32]): Current cost map.
         dones (NDArray[Shape["*"], Bool]): Current done map.
         done_states (np.ndarray): Current done states.
         env (ManagerBasedEnv): The environment to get the rewards from.
         obs (dict): The observations from the environment step.
 
     Returns:
-        StepCostMap: Updated cost map.
+        NDArray[Shape["*"], Float32]: Updated cost map.
         NDArray[Shape["*"], Bool]: Updated done map.
     """
     currently_done, currently_done_states = check_dones(env, obs)
     newly_done = np.logical_and(currently_done, np.logical_not(dones))
-    for idx in np.argwhere(newly_done):
-        an_obs = {k: v[idx] for k, v in obs["policy"].items()}
-        cost = get_cost(an_obs)
-        step_cost_map[idx] = cost
+    costs = get_costs(env)
+    step_cost_map[newly_done] = costs[newly_done]
     all_dones = np.logical_or(dones, currently_done)
     done_states[newly_done] = currently_done_states[newly_done]
     return step_cost_map, all_dones, done_states
@@ -201,7 +208,7 @@ def get_step_cost_map(
     env: ManagerBasedEnv,
     control: np.ndarray,
     state: IsaacStateTorch,
-) -> tuple[StepCostMap, np.ndarray]:
+) -> tuple[NDArray[Shape["4, N, M"], Float32], NDArray[Shape["4, N, M"], Any]]:
     """Evaluates an instance
 
     An instance consists of a starting state and a control input.
@@ -216,7 +223,8 @@ def get_step_cost_map(
         state (IsaacStateTorch): State to initialize with.
 
     Returns:
-        StepCostMap: Costs for each footstep position.
+        np.ndarray: Costs for each footstep position.
+            (4, N, M) where n and m are the number of footstep positions
         np.ndarray: States for each footstep position if done, else None.
             Note: I'm pretty sure these will never be none, not 100% though
     """
@@ -287,7 +295,7 @@ def main():
         debug_logging=False,
     )
 
-    state_cost_map: list[tuple[IsaacStateCPU, StepCostMap]] = []
+    state_cost_map: list[tuple[IsaacStateCPU, NDArray[Shape["4, N, M"], Float32]]] = []
 
     start_state: IsaacStateTorch = IsaacStateTorch(
         env.scene["robot"].data.joint_pos[0],
@@ -309,12 +317,17 @@ def main():
 
             # pick new start state from one of the 10 lowest cost terminal states
             flat_cost_map = cost_map.flatten()
-            # lowest_indices = np.argpartition(flat_cost_map, 10)[:10]
-            lowest_indices = np.argpartition(flat_cost_map, 99)[:99]
+            pick_from_best_n = 5
+            lowest_indices = np.argpartition(flat_cost_map, pick_from_best_n)[:pick_from_best_n]
             chosen_index = np.random.choice(lowest_indices)
             # the terminal states array is technically of IsaacStates
             state: IsaacStateCPU = terminal_states.flatten()[chosen_index]  # type: ignore
             start_state = state.to_torch(env.scene.device)
+
+            if args_cli.debug:
+                view_footstep_cost_map(
+                    cost_map, np.unravel_index(chosen_index, cost_map.shape)
+                )
 
     env_cfg.controllers = None
     del controllers
