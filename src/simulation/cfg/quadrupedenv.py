@@ -36,10 +36,10 @@ class QuadrupedEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         # general settings
-        self.decimation = 2  # env decimation -> 100 Hz control
+        self.decimation = 1  # env decimation -> 500 Hz control
         self.render_interval = self.decimation  # render at control rate
         # simulation settings
-        self.sim.dt = 0.005  # simulation timestep -> 200 Hz physics
+        self.sim.dt = 0.002  # simulation timestep -> 500 Hz physics
         self.sim.physics_material = self.scene.terrain.physics_material
 
         self.episode_length_s = 5
