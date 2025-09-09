@@ -126,6 +126,11 @@ def reset_all_to(
     """
     Reset all environments in the ManagerBasedEnv to the specified joint positions, velocities, and body states.
 
+    WARNING:
+        If you try to pass the tensors as a reference to the env state, it will not work correctly.
+        You MUST pass in a copy of the data. If you pass a reference, the env will modify the data
+        when it resets, and you will not get the desired behavior.
+
     Parameters:
     - env: ManagerBasedEnv instance
     - joint_pos_isaac: torch.Tensor of shape (num_envs, 12), or if shape (12,), will be broadcasted

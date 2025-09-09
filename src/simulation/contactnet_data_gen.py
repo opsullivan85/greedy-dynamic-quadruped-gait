@@ -1,5 +1,6 @@
 import argparse
 import signal
+from tracemalloc import start
 
 from isaaclab.app import AppLauncher
 
@@ -25,7 +26,7 @@ import multiprocessing
 import numpy as np
 import torch
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
 
@@ -56,12 +57,36 @@ signal.signal(signal.SIGINT, signal_handler)
 
 # frozen allows for hashing
 @dataclass(frozen=True)
-class IsaacState:
+class IsaacStateCPU:
+    """Class for keeping track of an Isaac state."""
+
+    joint_pos: np.ndarray
+    joint_vel: np.ndarray
+    body_state: np.ndarray
+
+    def to_torch(self, device: Any) -> "IsaacStateTorch":
+        """Convert to torch tensors on the specified device."""
+        return IsaacStateTorch(
+            joint_pos=torch.from_numpy(self.joint_pos).to(device),
+            joint_vel=torch.from_numpy(self.joint_vel).to(device),
+            body_state=torch.from_numpy(self.body_state).to(device),
+        )
+
+@dataclass()
+class IsaacStateTorch:
     """Class for keeping track of an Isaac state."""
 
     joint_pos: torch.Tensor
     joint_vel: torch.Tensor
     body_state: torch.Tensor
+
+    def to_numpy(self) -> IsaacStateCPU:
+        """Convert to numpy arrays."""
+        return IsaacStateCPU(
+            joint_pos=self.joint_pos.cpu().numpy(),
+            joint_vel=self.joint_vel.cpu().numpy(),
+            body_state=self.body_state.cpu().numpy(),
+        )
 
 
 StepCostMap: TypeAlias = np.ndarray
@@ -116,11 +141,11 @@ def check_dones(
     indices = np.argwhere(dones)
     for index in indices:
         i = index[0]
-        states[i] = IsaacState(
+        states[i] = IsaacStateTorch(
             env.scene["robot"].data.joint_pos[i],
             env.scene["robot"].data.joint_vel[i],
             env.scene["robot"].data.root_state_w[i],
-        )
+        ).to_numpy()
     return dones, states
 
     # # TODO: implement
@@ -175,7 +200,7 @@ def update_costs(
 def get_step_cost_map(
     env: ManagerBasedEnv,
     control: np.ndarray,
-    state: IsaacState,
+    state: IsaacStateTorch,
 ) -> tuple[StepCostMap, np.ndarray]:
     """Evaluates an instance
 
@@ -188,7 +213,7 @@ def get_step_cost_map(
             expected to have an instance for every footstep position. (4*n*m)
         control (np.ndarray): Control input for the instance.
             (3,) i.e. not (num_envs, 3) since they all have the same control.
-        state (IsaacState): State to initialize with.
+        state (IsaacStateTorch): State to initialize with.
 
     Returns:
         StepCostMap: Costs for each footstep position.
@@ -262,9 +287,9 @@ def main():
         debug_logging=False,
     )
 
-    state_cost_map: dict[IsaacState, StepCostMap] = {}
+    state_cost_map: list[tuple[IsaacStateCPU, StepCostMap]] = []
 
-    start_state: IsaacState = IsaacState(
+    start_state: IsaacStateTorch = IsaacStateTorch(
         env.scene["robot"].data.joint_pos[0],
         env.scene["robot"].data.joint_vel[0],
         env.scene["robot"].data.root_state_w[0],
@@ -280,14 +305,16 @@ def main():
                 control=np.zeros((3,), dtype=np.float32),
                 state=start_state,
             )
-            state_cost_map[start_state] = cost_map
+            state_cost_map.append((start_state.to_numpy(), cost_map))
 
             # pick new start state from one of the 10 lowest cost terminal states
             flat_cost_map = cost_map.flatten()
-            lowest_indices = np.argpartition(flat_cost_map, 10)[:10]
+            # lowest_indices = np.argpartition(flat_cost_map, 10)[:10]
+            lowest_indices = np.argpartition(flat_cost_map, 99)[:99]
             chosen_index = np.random.choice(lowest_indices)
             # the terminal states array is technically of IsaacStates
-            start_state = terminal_states.flatten()[chosen_index]  # type: ignore
+            state: IsaacStateCPU = terminal_states.flatten()[chosen_index]  # type: ignore
+            start_state = state.to_torch(env.scene.device)
 
     env_cfg.controllers = None
     del controllers
