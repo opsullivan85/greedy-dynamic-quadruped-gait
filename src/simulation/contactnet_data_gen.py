@@ -222,8 +222,11 @@ def get_costs(env: ManagerBasedEnv, mask: NDArray[Shape["*"], Bool]|None = None)
     swing_error_cost = 3 * cn_rewards.controller_real_swing_error(env)
     costs += swing_error_cost
 
-    support_polygon_cost = -2.0 * cn_rewards.support_polygon_area(env)
-    costs += support_polygon_cost
+    # support_polygon_cost = -2.0 * cn_rewards.support_polygon_area(env)
+    # costs += support_polygon_cost
+
+    inscribed_circle_radius = -1.0 * cn_rewards.inscribed_circle_radius(env)
+    costs += inscribed_circle_radius
 
     if args_cli.debug:
         # skip if less than 10% of the envs are being visualized
@@ -235,7 +238,8 @@ def get_costs(env: ManagerBasedEnv, mask: NDArray[Shape["*"], Bool]|None = None)
             joint_torques_l2_cost,
             joint_acc_l2_cost,
             swing_error_cost,
-            support_polygon_cost,
+            # support_polygon_cost,
+            inscribed_circle_radius,
         ])
         if mask is not None:
             vmin = float(torch.min(all[:, mask]))
@@ -244,12 +248,13 @@ def get_costs(env: ManagerBasedEnv, mask: NDArray[Shape["*"], Bool]|None = None)
             vmin = float(torch.min(all))
             vmax = float(torch.max(all))
         label_map = {
-            "lin_vel_z_l2_cost": lin_vel_z_l2_cost,
-            "ang_vel_xy_l2_cost": ang_vel_xy_l2_cost,
-            "joint_torques_l2_cost": joint_torques_l2_cost,
-            "joint_acc_l2_cost": joint_acc_l2_cost,
-            "swing_error_cost": swing_error_cost,
-            "support_polygon_cost": support_polygon_cost,
+            # "lin_vel_z_l2_cost": lin_vel_z_l2_cost,
+            # "ang_vel_xy_l2_cost": ang_vel_xy_l2_cost,
+            # "joint_torques_l2_cost": joint_torques_l2_cost,
+            # "joint_acc_l2_cost": joint_acc_l2_cost,
+            # "swing_error_cost": swing_error_cost,
+            # "support_polygon_cost": support_polygon_cost,
+            "inscribed_circle_radius": inscribed_circle_radius,
         }
         for label, cost in label_map.items():
             cost = cost.cpu().numpy()
@@ -403,7 +408,7 @@ def main():
         env.scene["robot"].data.root_state_w[0],
     )
 
-    control = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    control = np.array([0.1, 0.0, 0.0], dtype=np.float32)
 
     # simulate physics
     with controllers, torch.inference_mode():

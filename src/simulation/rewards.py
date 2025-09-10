@@ -1,3 +1,4 @@
+from unittest.util import three_way_cmp
 from isaaclab.envs import ManagerBasedEnv
 import torch
 from src.sim2real import SimInterface
@@ -106,6 +107,42 @@ def polygon_area_2d(vertices: torch.Tensor) -> torch.Tensor:
     return area
 
 
+def distance_from_virtual_line(
+    point: torch.Tensor, line_start: torch.Tensor, line_end: torch.Tensor
+) -> torch.Tensor:
+    """Calculate the shortest distance from a point to a line defined by two points in 2D.
+
+    Args:
+        point (torch.Tensor): The point to measure the distance from, shape (..., 2)
+        line_start (torch.Tensor): One endpoint of the line segment, shape (..., 2)
+        line_end (torch.Tensor): The other endpoint of the line segment, shape (..., 2)
+
+    Returns:
+        torch.Tensor: The shortest distance from the point to the line segment, shape (...)
+    """
+    p0 = point
+    x0 = p0[:, 0]
+    y0 = p0[:, 1]
+    p1 = line_start
+    x1 = p1[:, 0]
+    y1 = p1[:, 1]
+    p2 = line_end
+    x2 = p2[:, 0]
+    y2 = p2[:, 1]
+
+    m_numerator = y2 - y1
+    m_denominator = x2 - x1
+    # Avoid division by zero, prevent branching
+    m_denominator = torch.where(m_denominator == 0, torch.tensor(1e-8), m_denominator)
+    m = m_numerator / m_denominator
+
+    d_numerator = torch.abs(m * x0 - y0 + y2 - m * x2)
+    d_denominator = torch.sqrt(m * m + 1)
+    distance = d_numerator / d_denominator
+
+    return distance
+
+
 def support_polygon_area(
     env: ManagerBasedEnv,
 ) -> torch.Tensor:
@@ -155,3 +192,62 @@ def support_polygon_area(
         areas[four_contacts] = polygon_area_2d(foot_positions_2d)
 
     return areas
+
+def inscribed_circle_radius(
+    env: ManagerBasedEnv,
+) -> torch.Tensor:
+    """Calculate the radius of the inscribed circle of the support polygon formed by the feet in contact with the ground.
+
+    NOTE: this assumes that the COM is inside the support polygon. If the COM is outside the support polygon,
+        the radius will be positive, and non-sensical.
+
+    Args:
+        env (ManagerBasedEnv): The environment.
+
+    Returns:
+        torch.Tensor: The radius of the inscribed circle of the support polygon for each environment.
+    """
+    contact_forces = env.scene["contact_forces"].data.net_forces_w
+    foot_contacts = (
+        contact_forces.norm(dim=2) > env.scene["contact_forces"].cfg.force_threshold
+    )
+    foot_positions = env.scene["robot"].data.body_pos_w[:, env.cfg.foot_indices]  # type: ignore
+    com_position = env.scene["robot"].data.root_pos_w[:, :2]  # (num_envs, 2)
+    num_contacts = foot_contacts.sum(dim=1)
+
+    # Initialize radii to zero
+    radii = torch.zeros((env.num_envs,), device=env.device)
+    # use distance_from_virtual_line to calculate the radius of the inscribed circle
+    three_contacts = num_contacts == 3
+    if torch.any(three_contacts):
+        foot_positions_3 = foot_positions[three_contacts]  # (N, 4, 3)
+        foot_contacts_3 = foot_contacts[three_contacts]  # (N, 4)
+        com_position_3 = com_position[three_contacts]  # (N, 2)
+        # reshape is needed because torch implicitly flattens for some reason
+        foot_contact_positions = foot_positions_3[foot_contacts_3].reshape(
+            -1, 3, 3
+        )  # (N, 3, 3)
+        foot_contact_positions_2d = foot_contact_positions[:, :, :2]  # (N, 3, 2)
+        distances = torch.stack([
+            distance_from_virtual_line(com_position_3, foot_contact_positions_2d[:, 0], foot_contact_positions_2d[:, 1]),
+            distance_from_virtual_line(com_position_3, foot_contact_positions_2d[:, 1], foot_contact_positions_2d[:, 2]),
+            distance_from_virtual_line(com_position_3, foot_contact_positions_2d[:, 2], foot_contact_positions_2d[:, 0]),
+        ], dim=1)  # (N, 3)
+        radii[three_contacts] = torch.min(distances, dim=1).values
+    
+    four_contacts = num_contacts == 4
+    if torch.any(four_contacts):
+        foot_positions_4 = foot_positions[four_contacts]  # (N, 4, 3)
+        com_position_4 = com_position[four_contacts]  # (N, 2)
+        # Reorder feet to avoid self-intersecting polygon: [FL, FR, RL, RR] -> [FR, FL, RL, RR]
+        foot_positions_4 = foot_positions_4[:, [1, 0, 2, 3]]  # (N, 4, 3)
+        foot_positions_2d = foot_positions_4[..., :2]  # (N, 4, 2)
+        distances = torch.stack([
+            distance_from_virtual_line(com_position_4, foot_positions_2d[:, 0], foot_positions_2d[:, 1]),
+            distance_from_virtual_line(com_position_4, foot_positions_2d[:, 1], foot_positions_2d[:, 2]),
+            distance_from_virtual_line(com_position_4, foot_positions_2d[:, 2], foot_positions_2d[:, 3]),
+            distance_from_virtual_line(com_position_4, foot_positions_2d[:, 3], foot_positions_2d[:, 0]),
+        ], dim=1)  # (N, 4)
+        radii[four_contacts] = torch.min(distances, dim=1).values
+
+    return radii
