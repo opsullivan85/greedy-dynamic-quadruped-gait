@@ -27,12 +27,7 @@ def view_footstep_cost_map(
 
     # Compute global min and max for consistent colorbar
     vmin = float(np.min(cost_map)) if vmin is None else vmin
-    vmax = float(np.max(cost_map)) if vmax is None else vmax
-
-    # Reorder cost_map from [FR, FL, RR, RL] to [FR, FL, RR, RL] for display
-    # This keeps the original order but rotates each map 180 degrees
-    display_order = [0, 1, 2, 3]  # FR, FL, RR, RL (no reordering, just rotation)
-    cost_map_display = np.array([np.flipud(cost_map[i]) for i in display_order])
+    vmax = min(20, float(np.max(cost_map))) if vmax is None else vmax
 
     # Store subplot references
     axes = []
@@ -44,7 +39,7 @@ def view_footstep_cost_map(
         axes.append(ax)
         ax.set_title(titles[i])
         im = ax.imshow(
-            cost_map_display[i], cmap="hot", interpolation="nearest", vmin=vmin, vmax=vmax
+            cost_map[i, ::-1, ::-1], cmap="hot", interpolation="nearest", vmin=vmin, vmax=vmax
         )
         # Overlay the flat index value for each pixel
         H, W = cost_map.shape[1:]
@@ -54,8 +49,7 @@ def view_footstep_cost_map(
                 # Since we rotated 180 degrees, we need to flip the row and col
                 original_row = H - 1 - row
                 original_col = W - 1 - col
-                original_leg_idx = display_order[i]
-                flat_idx = np.ravel_multi_index((original_leg_idx, original_row, original_col), cost_map.shape)
+                flat_idx = np.ravel_multi_index((i, original_row, original_col), cost_map.shape)
                 ax.text(
                     col,
                     row,
@@ -77,13 +71,11 @@ def view_footstep_cost_map(
     # Plot the selected point on the correct subplot (adjust for display reordering and rotation)
     if selected_idx is not None:
         foot, row, col = selected_idx
-        # Find which display position this leg maps to
-        display_idx = display_order.index(foot)
         # Since we rotated 180 degrees, flip the row and col coordinates
         H, W = cost_map.shape[1:]
         rotated_row = H - 1 - row
         rotated_col = W - 1 - col
-        axes[display_idx].scatter([rotated_col], [rotated_row], color="blue", s=100, marker="x")
+        axes[foot].scatter([rotated_col], [rotated_row], color="blue", s=100, marker="x")
 
     if title is not None:
         plt.suptitle(title)
