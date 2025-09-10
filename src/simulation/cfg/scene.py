@@ -13,6 +13,8 @@ from src.simulation.cfg.footstep_scanner import (
 from src.simulation.cfg.robot import ROBOT_CFG
 from src.simulation.cfg.terrain import VoidTerrainImporterCfg
 
+import numpy as np
+
 
 @configclass
 class SceneCfg(InteractiveSceneCfg):
@@ -28,9 +30,10 @@ class SceneCfg(InteractiveSceneCfg):
     RR_foot_scanner: RayCasterCfg = RR_FootstepScannerCfg()
 
     contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/trunk",
+        prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
         update_period=0.0,
         debug_vis=True,
+        track_air_time=True,
     )
 
     light = AssetBaseCfg(

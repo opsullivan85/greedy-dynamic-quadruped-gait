@@ -10,7 +10,7 @@ import numpy as np
 from nptyping import Float32, NDArray, Shape
 
 import src.sim2real.siminterface as SimInterface
-from src.sim2real import VectorPool
+from src.util import VectorPool
 from src.simulation.util import (
     interface_to_isaac_torques,
     isaac_body_to_interface,

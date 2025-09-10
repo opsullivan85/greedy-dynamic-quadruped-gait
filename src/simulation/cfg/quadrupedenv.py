@@ -3,7 +3,8 @@ import logging
 from isaaclab.envs import ManagerBasedRLEnvCfg  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
 
-from src.sim2real import SimInterface, VectorPool
+from src.sim2real import SimInterface
+from src.util import VectorPool
 from src.simulation.cfg.manager_components import (
     ActionsCfg,
     EventsCfg,
@@ -12,6 +13,7 @@ from src.simulation.cfg.manager_components import (
     TerminationsCfg,
 )
 from src.simulation.cfg.scene import SceneCfg
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,9 @@ class QuadrupedEnvCfg(ManagerBasedRLEnvCfg):
     # controller
     # we need this here so the events can access it to reset individual robots
     controllers: VectorPool[SimInterface] | None = None
+
+    foot_indices = np.asarray([13, 14, 15, 16], dtype=np.int32)
+    """In order: FL, FR, RL, RR"""
 
     def __post_init__(self):
         """Post initialization."""
@@ -65,6 +70,7 @@ def get_quadruped_env_cfg(num_envs: int, device: str) -> QuadrupedEnvCfg:
         cfg.scene.FL_foot_scanner,
         cfg.scene.RL_foot_scanner,
         cfg.scene.RR_foot_scanner,
+        cfg.scene.contact_forces,
     ]:
-        scanner.update_period = cfg.decimation * cfg.sim.dt  # 100 Hz
+        scanner.update_period = cfg.decimation * cfg.sim.dt  # control rate
     return cfg

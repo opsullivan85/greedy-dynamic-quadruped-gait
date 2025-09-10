@@ -131,3 +131,6 @@ class SimInterface(Sim2RealInterface):
     # override
     def get_swing_phase(self) -> NDArray[Shape["4"], Float32]:
         return self.robot_runner.cMPC.gait.getSwingPhase().flatten()
+    
+    def get_swing_durations(self) -> NDArray[Shape["4, 1"], Float32]:
+        return self.robot_runner.cMPC.gait.swing_durations

@@ -27,7 +27,8 @@ import torch
 
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedEnv
 
-from src.sim2real import SimInterface, VectorPool
+from src.sim2real import SimInterface
+from src.util import VectorPool
 from src.simulation.util import controls_to_joint_efforts, reset_all_to
 from src.util.data_logging import data_logger
 from src.simulation.cfg.quadrupedenv import QuadrupedEnvCfg, get_quadruped_env_cfg

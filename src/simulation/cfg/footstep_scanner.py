@@ -8,7 +8,7 @@ _hip_names = ["FL_hip", "FR_hip", "RL_hip", "RR_hip"]
 # Distance between rays in the grid and overall grid size
 grid_resolution = 0.050
 # Odd numbers will be centered on the _stable_footstep_offset
-grid_size = (5, 5)
+grid_size = (9, 9)
 
 # Configure offset positions for the raycasters relative to each hip
 # note that all axes are in the same orientation as the robot body frame

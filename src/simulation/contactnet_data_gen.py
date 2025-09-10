@@ -32,13 +32,14 @@ from typing import Any, TypeAlias
 from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
 from isaaclab.envs.mdp import rewards
 
-from src.sim2real import SimInterface, VectorPool
+import src.simulation.rewards as cn_rewards
+from src.sim2real import SimInterface
 from src.simulation.util import controls_to_joint_efforts, reset_all_to
-from src.util.data_logging import data_logger
+from src.util import VectorPool
 from src.simulation.cfg.quadrupedenv import QuadrupedEnvCfg, get_quadruped_env_cfg
 import src.simulation.cfg.footstep_scanner as fs
 from src.simulation.debug import view_footstep_cost_map
-from nptyping import Float32, NDArray, Shape, Bool
+from nptyping import Float32, Int32, NDArray, Shape, Bool
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,44 @@ def get_step_locations_hip() -> NDArray[Shape["4, N, M ,2"], Float32]:
     return legs.astype(np.float32)
 
 
+def _controller_dones(
+    controllers: VectorPool[SimInterface],
+) -> NDArray[Shape["*"], Bool]:
+    """Check which controllers are done.
+
+    Args:
+        controllers (VectorPool[SimInterface]): The controllers to check.
+
+    Returns:
+        np.ndarray: Array of booleans indicating which controllers are done.
+    """
+    done_state = np.asarray((1, 1, 1, 1), dtype=bool)
+    contact_states = controllers.call(
+        SimInterface.get_contact_state,
+        mask=None,
+    )
+    dones = np.all(contact_states == done_state, axis=1)
+    return dones
+
+
+def _contact_sensor_dones(
+        env: ManagerBasedEnv,
+) -> NDArray[Shape["*"], Bool]:
+    """Check which robots are done based on contact sensors.
+
+    Args:
+        env (ManagerBasedEnv): The environment to check.
+
+    Returns:
+        np.ndarray: Array of booleans indicating which robots are done.
+    """
+    contact_forces = env.scene["contact_forces"].data.net_forces_w
+    # robot is done if all feet have contact force above threshold
+    foot_contacts = contact_forces.norm(dim=2) > env.scene["contact_forces"].cfg.force_threshold
+    dones = np.all(foot_contacts.cpu().numpy(), axis=1)
+    return dones
+
+
 def check_dones(
     env: ManagerBasedEnv, obs: dict[str, dict[str, torch.Tensor]]
 ) -> tuple[NDArray[Shape["*"], Bool], np.ndarray]:
@@ -130,12 +169,11 @@ def check_dones(
         np.ndarray: State of the done robots
     """
     controllers: VectorPool[SimInterface] = env.cfg.controllers  # type: ignore
-    contact_states = controllers.call(
-        SimInterface.get_contact_state,
-        mask=None,
-    )
-    done_state = np.asarray((1, 1, 1, 1), dtype=bool)
-    dones = np.all(contact_states == done_state, axis=1)
+    controller_dones = _controller_dones(controllers)
+    dones = np.zeros((env.num_envs,), dtype=bool)
+    if np.any(controller_dones):
+        contact_sensor_dones = _contact_sensor_dones(env)
+        dones = np.logical_and(controller_dones, contact_sensor_dones)
 
     states = np.full((env.num_envs,), None, dtype=object)
     indices = np.argwhere(dones)
@@ -170,6 +208,8 @@ def get_costs(env: ManagerBasedEnv) -> NDArray[Shape["*"], Float32]:
     costs += 0.05 * rewards.ang_vel_xy_l2(env)  # type: ignore
     costs += 1.0e-5 * rewards.joint_torques_l2(env)  # type: ignore
     costs += 2.5e-7 * rewards.joint_acc_l2(env)  # type: ignore
+    costs += 3 * cn_rewards.controller_real_swing_error(env)
+    costs += -2.0 * cn_rewards.support_polygon_area(env)
     # move costs to cpu
     costs = costs.cpu().numpy()
     return costs
@@ -197,8 +237,9 @@ def update_costs(
     """
     currently_done, currently_done_states = check_dones(env, obs)
     newly_done = np.logical_and(currently_done, np.logical_not(dones))
-    costs = get_costs(env)
-    step_cost_map[newly_done] = costs[newly_done]
+    if np.any(newly_done):
+        costs = get_costs(env)
+        step_cost_map[newly_done] = costs[newly_done]
     all_dones = np.logical_or(dones, currently_done)
     done_states[newly_done] = currently_done_states[newly_done]
     return step_cost_map, all_dones, done_states
@@ -259,6 +300,8 @@ def get_step_cost_map(
     step_cost_map = np.zeros((4 * N * M,), dtype=np.float32)
     dones = np.zeros((4 * N * M,), dtype=bool)
     done_states = np.full((4 * N * M,), None, dtype=object)
+    max_time_s = 0.25  # max time to simulate
+    elapsed_time_s = 0.0
 
     while simulation_app.is_running() and not shutdown_requested:  # Add flag check
         joint_efforts = controls_to_joint_efforts(control_vect, controllers, env.scene)
@@ -270,7 +313,12 @@ def get_step_cost_map(
         step_cost_map, dones, done_states = update_costs(
             step_cost_map, dones, done_states, env, obs
         )
+        elapsed_time_s += env.cfg.sim.dt * env.cfg.decimation
         if np.all(dones):
+            break
+        if elapsed_time_s >= max_time_s:
+            # apply a cost penalty for not finishing
+            step_cost_map[~dones] += 100.0
             break
 
     step_cost_map = step_cost_map.reshape((4, N, M))
@@ -323,16 +371,18 @@ def main():
             # pick new start state from one of the 10 lowest cost terminal states
             flat_cost_map = cost_map.flatten()
             pick_from_best_n = 5
-            lowest_indices = np.argpartition(flat_cost_map, pick_from_best_n)[:pick_from_best_n]
+            lowest_indices = np.argpartition(flat_cost_map, pick_from_best_n)[
+                :pick_from_best_n
+            ]
             chosen_index = np.random.choice(lowest_indices)
             # the terminal states array is technically of IsaacStates
             state: IsaacStateCPU = terminal_states.flatten()[chosen_index]  # type: ignore
             start_state = state.to_torch(env.scene.device)
 
-            # if args_cli.debug:
-            #     view_footstep_cost_map(
-            #         cost_map, np.unravel_index(chosen_index, cost_map.shape)
-            #     )
+            if args_cli.debug:
+                view_footstep_cost_map(
+                    cost_map, np.unravel_index(chosen_index, cost_map.shape)
+                )
 
     env_cfg.controllers = None
     del controllers

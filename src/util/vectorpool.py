@@ -144,6 +144,7 @@ class VectorPool(Generic[T]):
                             if not mask[i]:
                                 # nan here still allows the output array to be typed
                                 results_list.append(np.nan)
+                                continue
                             function = getattr(objects[i], function_name)
                             args = [batch_arg[i] for batch_arg in batch_args]
                             result = function(*args)
@@ -215,6 +216,7 @@ class VectorPool(Generic[T]):
         Args:
             function (Callable): function to call (should be a handle to a function from T)
             mask (None | NDArray[Shape["*"], Bool]): mask to apply to the function inputs
+                masked values result in nan outputs
             kwargs (np.ndarray): arguments to pass to function. same type but with dimensionality
                 one higher than the function's input
 
