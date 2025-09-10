@@ -100,7 +100,7 @@ def get_step_locations_hip() -> NDArray[Shape["4, N, M ,2"], Float32]:
     Returns:
         np.ndarray: Array of footstep locations relative to the hip.
             (4, N, M, 2) where n and m are the number of footstep positions.
-            in FL, FR, RL, RR order.
+            in FR, FL, RR, RL order.
     """
     N, M = fs.grid_size
     leg = np.empty((N, M, 2), dtype=np.float32)
@@ -165,7 +165,7 @@ def check_dones(
     Returns:
         np.ndarray: Array of booleans indicating which footstep positions are done.
             (4*N*M) where n and m are the number of footstep positions.
-            in FL, FR, RL, RR order.
+            in FR, FL, RR, RL order.
         np.ndarray: State of the done robots
     """
     controllers: VectorPool[SimInterface] = env.cfg.controllers  # type: ignore
@@ -191,11 +191,13 @@ def check_dones(
     # return np.zeros((4 * N * M,), dtype=bool)
 
 
-def get_costs(env: ManagerBasedEnv) -> NDArray[Shape["*"], Float32]:
+def get_costs(env: ManagerBasedEnv, mask: NDArray[Shape["*"], Bool]|None = None) -> NDArray[Shape["*"], Float32]:
     """Get the cost for a footstep position.
 
     Args:
         env (ManagerBasedEnv): The environment to get the costs from.
+        mask (NDArray[Shape["*"], Bool]): Boolean mask of which footstep positions to get costs for.
+            Only used in debug visualization.
 
     Returns:
         np.ndarray: Array of costs for each footstep position.
@@ -204,12 +206,62 @@ def get_costs(env: ManagerBasedEnv) -> NDArray[Shape["*"], Float32]:
     # - foot position errors (to avoid slipping)
     # - support polygon stability (to avoid falling)
     costs = torch.zeros((env.num_envs,), device=env.scene.device)
-    costs += 2.0 * rewards.lin_vel_z_l2(env)  # type: ignore
-    costs += 0.05 * rewards.ang_vel_xy_l2(env)  # type: ignore
-    costs += 1.0e-5 * rewards.joint_torques_l2(env)  # type: ignore
-    costs += 2.5e-7 * rewards.joint_acc_l2(env)  # type: ignore
-    costs += 3 * cn_rewards.controller_real_swing_error(env)
-    costs += -2.0 * cn_rewards.support_polygon_area(env)
+
+    lin_vel_z_l2_cost = 2.0 * rewards.lin_vel_z_l2(env)  # type: ignore
+    costs += lin_vel_z_l2_cost
+
+    ang_vel_xy_l2_cost = 0.05 * rewards.ang_vel_xy_l2(env)  # type: ignore
+    costs += ang_vel_xy_l2_cost
+
+    joint_torques_l2_cost = 1.0e-5 * rewards.joint_torques_l2(env)  # type: ignore
+    costs += joint_torques_l2_cost
+
+    joint_acc_l2_cost = 2.5e-7 * rewards.joint_acc_l2(env)  # type: ignore
+    costs += joint_acc_l2_cost
+
+    swing_error_cost = 3 * cn_rewards.controller_real_swing_error(env)
+    costs += swing_error_cost
+
+    support_polygon_cost = -2.0 * cn_rewards.support_polygon_area(env)
+    costs += support_polygon_cost
+
+    if args_cli.debug:
+        # skip if less than 10% of the envs are being visualized
+        if mask is not None and np.sum(mask) < 0.1 * env.num_envs:
+            return costs.cpu().numpy()
+        all = torch.stack([
+            lin_vel_z_l2_cost,
+            ang_vel_xy_l2_cost,
+            joint_torques_l2_cost,
+            joint_acc_l2_cost,
+            swing_error_cost,
+            support_polygon_cost,
+        ])
+        if mask is not None:
+            vmin = float(torch.min(all[:, mask]))
+            vmax = float(torch.max(all[:, mask]))
+        else:
+            vmin = float(torch.min(all))
+            vmax = float(torch.max(all))
+        label_map = {
+            "lin_vel_z_l2_cost": lin_vel_z_l2_cost,
+            "ang_vel_xy_l2_cost": ang_vel_xy_l2_cost,
+            "joint_torques_l2_cost": joint_torques_l2_cost,
+            "joint_acc_l2_cost": joint_acc_l2_cost,
+            "swing_error_cost": swing_error_cost,
+            "support_polygon_cost": support_polygon_cost,
+        }
+        for label, cost in label_map.items():
+            cost = cost.cpu().numpy()
+            if mask is not None:
+                cost = np.where(mask, cost, np.nan)
+            view_footstep_cost_map(
+                cost.reshape((4, fs.grid_size[0], fs.grid_size[1])),
+                title=label,
+                vmin=vmin,
+                vmax=vmax,
+            )
+
     # move costs to cpu
     costs = costs.cpu().numpy()
     return costs
@@ -238,7 +290,7 @@ def update_costs(
     currently_done, currently_done_states = check_dones(env, obs)
     newly_done = np.logical_and(currently_done, np.logical_not(dones))
     if np.any(newly_done):
-        costs = get_costs(env)
+        costs = get_costs(env, mask=newly_done)
         step_cost_map[newly_done] = costs[newly_done]
     all_dones = np.logical_or(dones, currently_done)
     done_states[newly_done] = currently_done_states[newly_done]
@@ -351,10 +403,7 @@ def main():
         env.scene["robot"].data.root_state_w[0],
     )
 
-    # # let robot settle into more natural pose
-    # for _ in range(50):
-    #     zero_efforts = torch.zeros((num_envs, 12), device=env.scene.device)
-    #     _ = env.step(zero_efforts)
+    control = np.array([0.0, 0.0, 0.0], dtype=np.float32)
 
     # simulate physics
     with controllers, torch.inference_mode():
@@ -363,7 +412,7 @@ def main():
             # grab initial state from robot 0
             cost_map, terminal_states = get_step_cost_map(
                 env,
-                control=np.zeros((3,), dtype=np.float32),
+                control=control,
                 state=start_state,
             )
             state_cost_map.append((start_state.to_numpy(), cost_map))
@@ -381,7 +430,7 @@ def main():
 
             if args_cli.debug:
                 view_footstep_cost_map(
-                    cost_map, np.unravel_index(chosen_index, cost_map.shape)
+                    cost_map, np.unravel_index(chosen_index, cost_map.shape), title="Footstep Cost Map"
                 )
 
     env_cfg.controllers = None
