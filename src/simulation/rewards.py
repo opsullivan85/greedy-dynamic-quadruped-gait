@@ -79,6 +79,33 @@ def triangle_area(
     return area
 
 
+def polygon_area_2d(vertices: torch.Tensor) -> torch.Tensor:
+    """Calculate the area of 2D polygons using the Shoelace formula.
+    
+    Works for both convex and non-convex (simple) polygons.
+    NOTE: this will not work for self-intersecting polygons.
+    
+    Args:
+        vertices (torch.Tensor): Polygon vertices, shape (..., N, 2) where N is number of vertices
+        
+    Returns:
+        torch.Tensor: Areas of the polygons, shape (...)
+    """
+    # Shift vertices to get pairs (x_i, y_i) and (x_{i+1}, y_{i+1})
+    x = vertices[..., 0]  # (..., N)
+    y = vertices[..., 1]  # (..., N)
+    
+    # Roll to get next vertices (cyclically)
+    x_next = torch.roll(x, shifts=-1, dims=-1)
+    y_next = torch.roll(y, shifts=-1, dims=-1)
+    
+    # Shoelace formula: 0.5 * |sum(x_i * y_{i+1} - x_{i+1} * y_i)|
+    cross_terms = x * y_next - x_next * y
+    area = 0.5 * torch.abs(torch.sum(cross_terms, dim=-1))
+    
+    return area
+
+
 def support_polygon_area(
     env: ManagerBasedEnv,
 ) -> torch.Tensor:
@@ -117,22 +144,14 @@ def support_polygon_area(
             foot_contact_positions[:, 1],
             foot_contact_positions[:, 2],
         )
-    # 4 contacts -> area = area of two triangles
+    # 4 contacts -> area = area of quadrilateral using Shoelace formula
     four_contacts = num_contacts == 4
     if torch.any(four_contacts):
-        foot_positions_4 = foot_positions[four_contacts]
-        # note the important ordering of indices for the triangles here
-        # foot ordering is [FL, FR, RL, RR],
-        # so the triangles need to be (FL, FR, RL) and (FR, RL, RR)
-        # as to not have intersecting triangles
-        areas[four_contacts] = triangle_area(
-            foot_positions_4[:, 0],
-            foot_positions_4[:, 1],
-            foot_positions_4[:, 2],
-        ) + triangle_area(  # type: ignore
-            foot_positions_4[:, 1],
-            foot_positions_4[:, 2],
-            foot_positions_4[:, 3],
-        )
+        foot_positions_4 = foot_positions[four_contacts]  # (N, 4, 3)
+        # Reorder feet to avoid self-intersecting polygon: [FL, FR, RL, RR] -> [FR, FL, RL, RR]
+        foot_positions_4 = foot_positions_4[:, [1, 0, 2, 3]]  # (N, 4, 3)
+        # Project to 2D (use x, y coordinates) for the Shoelace formula
+        foot_positions_2d = foot_positions_4[..., :2]  # (N, 4, 2)
+        areas[four_contacts] = polygon_area_2d(foot_positions_2d)
 
     return areas
