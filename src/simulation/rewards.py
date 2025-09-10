@@ -109,11 +109,10 @@ def support_polygon_area(
         foot_positions_3 = foot_positions[three_contacts]  # (N, 4, 3)
         foot_contacts_3 = foot_contacts[three_contacts]  # (N, 4)
         # reshape is needed because torch implicitly flattens for some reason
-        # triangle.area only works on cpu
         foot_contact_positions = foot_positions_3[foot_contacts_3].reshape(
             -1, 3, 3
         )  # (N, 3, 3)
-        areas[three_contacts] = triangle_area(  # type: ignore
+        areas[three_contacts] = triangle_area(
             foot_contact_positions[:, 0],
             foot_contact_positions[:, 1],
             foot_contact_positions[:, 2],
@@ -122,12 +121,16 @@ def support_polygon_area(
     four_contacts = num_contacts == 4
     if torch.any(four_contacts):
         foot_positions_4 = foot_positions[four_contacts]
-        areas[four_contacts] = triangle_area(  # type: ignore
+        # note the important ordering of indices for the triangles here
+        # foot ordering is [FL, FR, RL, RR],
+        # so the triangles need to be (FL, FR, RL) and (FR, RL, RR)
+        # as to not have intersecting triangles
+        areas[four_contacts] = triangle_area(
             foot_positions_4[:, 0],
             foot_positions_4[:, 1],
             foot_positions_4[:, 2],
         ) + triangle_area(  # type: ignore
-            foot_positions_4[:, 0],
+            foot_positions_4[:, 1],
             foot_positions_4[:, 2],
             foot_positions_4[:, 3],
         )
