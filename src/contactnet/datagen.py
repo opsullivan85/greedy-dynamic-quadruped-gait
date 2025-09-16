@@ -13,10 +13,10 @@ parser.add_argument("--debug", action="store_true", help="Enable debug views.")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
-args_cli = parser.parse_args()
+args, unused_args = parser.parse_known_args()
 
 # launch omniverse app
-app_launcher = AppLauncher(args_cli)
+app_launcher = AppLauncher(args)
 simulation_app = app_launcher.app
 
 """Rest everything follows."""
@@ -32,7 +32,7 @@ from typing import Any, TypeAlias
 from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
 from isaaclab.envs.mdp import rewards
 
-import src.simulation.rewards as cn_rewards
+import src.contactnet.rewards as cn_rewards
 from src.sim2real import SimInterface
 from src.simulation.util import controls_to_joint_efforts, reset_all_to
 from src.util import VectorPool
@@ -228,7 +228,7 @@ def get_costs(env: ManagerBasedEnv, mask: NDArray[Shape["*"], Bool]|None = None)
     inscribed_circle_radius = -1.0 * cn_rewards.inscribed_circle_radius(env)
     costs += inscribed_circle_radius
 
-    if args_cli.debug:
+    if args.debug:
         # skip if less than 10% of the envs are being visualized
         if mask is not None and np.sum(mask) < 0.1 * env.num_envs:
             return costs.cpu().numpy()
@@ -388,7 +388,7 @@ def main():
     # 4 since there are 4 feet
     num_envs = 4 * fs.grid_size[0] * fs.grid_size[1]
     # create environment configuration
-    env_cfg: QuadrupedEnvCfg = get_quadruped_env_cfg(num_envs, args_cli.device)
+    env_cfg: QuadrupedEnvCfg = get_quadruped_env_cfg(num_envs, args.device)
     # setup RL environment
     env = ManagerBasedEnv(cfg=env_cfg)
     iterations_between_mpc = 10  # 50 Hz MPC
@@ -433,7 +433,7 @@ def main():
             state: IsaacStateCPU = terminal_states.flatten()[chosen_index]  # type: ignore
             start_state = state.to_torch(env.scene.device)
 
-            if args_cli.debug:
+            if args.debug:
                 view_footstep_cost_map(
                     cost_map, np.unravel_index(chosen_index, cost_map.shape), title="Footstep Cost Map"
                 )
