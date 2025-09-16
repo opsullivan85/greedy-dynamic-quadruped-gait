@@ -1,4 +1,5 @@
 from ast import Raise
+from calendar import c
 import numpy as np
 import matplotlib.pyplot as plt
 from nptyping import Float32, NDArray, Shape
@@ -26,8 +27,8 @@ def view_footstep_cost_map(
     plt.clf()
 
     # Compute global min and max for consistent colorbar
-    vmin = float(np.min(cost_map)) if vmin is None else vmin
-    vmax = min(20, float(np.max(cost_map))) if vmax is None else vmax
+    vmin = float(np.min(cost_map[~np.isnan(cost_map)])) if vmin is None else vmin
+    vmax = float(np.max(cost_map[~np.isnan(cost_map)])) if vmax is None else vmax
 
     # Store subplot references
     axes = []
@@ -39,6 +40,7 @@ def view_footstep_cost_map(
         axes.append(ax)
         ax.set_title(titles[i])
         im = ax.imshow(
+            # cost_map[i, ::-1, ::-1], cmap="hot", interpolation="nearest"
             cost_map[i, ::-1, ::-1], cmap="hot", interpolation="nearest", vmin=vmin, vmax=vmax
         )
         # Overlay the flat index value for each pixel

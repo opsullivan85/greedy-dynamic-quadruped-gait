@@ -15,7 +15,7 @@ class ProjectRelativeFormatter(logging.Formatter):
             path = Path(record.pathname).resolve()
             record.relpath = path.relative_to(PROJECT_ROOT)
         except Exception:
-            logger.debug(f"Failed to make path relative: {record.pathname}")
+            # logger.debug(f"Failed to make path relative: {record.pathname}")
             record.relpath = record.pathname  # fallback to absolute
         return super().format(record)
 
