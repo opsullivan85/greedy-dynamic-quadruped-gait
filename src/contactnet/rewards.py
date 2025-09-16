@@ -251,3 +251,72 @@ def inscribed_circle_radius(
         radii[four_contacts] = torch.min(distances, dim=1).values
 
     return radii
+
+def foot_com_distance(
+    env: ManagerBasedEnv,
+) -> torch.Tensor:
+    """Gets the cost associated with the feet being too far away
+    
+    projects everything to the same z level for R2 distance claculation
+
+    Args:
+        env (ManagerBasedEnv): The environment.
+
+    Returns:
+        torch.Tensor: A float tensor of shape (num_envs,) representing how far the feet are away.
+    """
+    foot_positions = env.scene["robot"].data.body_pos_w[:, env.cfg.foot_indices, :2]  # type: ignore
+    com_position = env.scene["robot"].data.root_pos_w[:, :2]  # (num_envs, 2)
+
+    # Calculate distances from COM to each foot
+    distances = torch.norm(foot_positions - com_position.unsqueeze(1), dim=2)
+    # Sum distances for all feet
+    distance = distances.sum(dim=1)
+    return distance
+
+def foot_hip_distance(
+    env: ManagerBasedEnv
+) -> torch.Tensor:
+    """Gets the cost associated with the feet being too far away from the hips
+
+    projects everything to the same z level for R2 distance claculation
+
+    Args:
+        env (ManagerBasedEnv): The environment.
+    
+    Returns:
+        torch.Tensor: A float tensor of shape (num_envs,) representing how far the feet are away from the hips.
+    """
+    foot_positions = env.scene["robot"].data.body_pos_w[:, env.cfg.foot_indices, :2]  # type: ignore
+    hip_positions = env.scene["robot"].data.body_pos_w[:, env.cfg.hip_indices, :2]  # type: ignore
+
+    # get the scalar euclidean distance
+    distances = torch.norm(foot_positions - hip_positions, dim=2)
+    # sum distances for all feet
+    distance = distances.sum(dim=1)
+    return distance
+
+def control_velocity_alignment(
+    env: ManagerBasedEnv,
+    control: torch.Tensor
+) -> torch.Tensor:
+    """Cost based on the alignment of the commanded velocity and the actual velocity.
+
+    Args:
+        env (ManagerBasedEnv): The environment.
+        control (torch.Tensor): The control input, shape (num_envs, 3) where the last dimension is (vx, vy, omega).
+            control is taken to be in the base frame
+
+    Returns:
+        torch.Tensor: A float tensor of shape (num_envs,) representing the control velocity alignment cost.
+    """
+    linear_velocity = env.scene["robot"].data.root_lin_vel_b[:, :2]  # (num_envs, 2)
+    angular_velocity = env.scene["robot"].data.root_ang_vel_b[:, 2]  # (num_envs,)
+    commanded_linear_velocity = control[:, :2]  # (num_envs, 2)
+    commanded_angular_velocity = control[:, 2]  # (num_envs,)
+    # Calculate the differences
+    linear_diff = torch.norm(linear_velocity - commanded_linear_velocity, dim=1)  # (num_envs,)
+    angular_diff = torch.abs(angular_velocity - commanded_angular_velocity)  # (num_envs,)
+    # Combine the differences into a single cost
+    cost = linear_diff + angular_diff
+    return cost

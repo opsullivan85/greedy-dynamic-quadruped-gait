@@ -38,6 +38,8 @@ class QuadrupedEnvCfg(ManagerBasedRLEnvCfg):
     # ['trunk', 'FL_hip', 'FR_hip', 'RL_hip', 'RR_hip', 'FL_thigh', 'FR_thigh', 'RL_thigh', 'RR_thigh', 'FL_calf', 'FR_calf', 'RL_calf', 'RR_calf', 'FL_foot', 'FR_foot', 'RL_foot', 'RR_foot']
     foot_indices = np.asarray([13, 14, 15, 16], dtype=np.int32)
     """In order: FL, FR, RL, RR"""
+    hip_indices = np.asarray([1, 2, 3, 4], dtype=np.int32)
+    """In order: FL, FR, RL, RR"""
 
     def __post_init__(self):
         """Post initialization."""

@@ -31,7 +31,7 @@ def view_footstep_cost_map(
 
     # Store subplot references
     axes = []
-    titles = ["Front Right", "Front Left", "Rear Right", "Rear Left"]
+    titles = ["Front Left", "Front Right", "Rear Left", "Rear Right"]
 
     im = None
     for i in range(4):
