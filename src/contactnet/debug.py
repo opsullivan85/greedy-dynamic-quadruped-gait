@@ -102,40 +102,56 @@ def view_multiple_footstep_cost_maps(
         return
 
     # Figure
-    f = plt.figure(figsize=(6 * M, 8))
 
-    nrows = 2*2
-    ncols = int(M/2)
+    nrows_groups = 2
+    ncols_groups = (M + nrows_groups - 1) // nrows_groups  # ceil(M / 2)
+
+    f = plt.figure(figsize=(4*ncols_groups, 3*nrows_groups))
+
+    margin = 0.05
+    gap = 0.05
+    plot_width = 1 - 2 * margin - (ncols_groups - 1) * gap
+    plot_height = 1 - 2 * margin - (nrows_groups - 1) * gap
+    width_per_group = plot_width / ncols_groups
+    height_per_group = plot_height / nrows_groups
 
     axes_groups = []
     im = None
     for i in range(M):
-        ag = AxesGrid(f, (nrows, ncols, i + 1), nrows_ncols=(2, 2), axes_pad=0)
+        row = i // ncols_groups
+        col = i % ncols_groups
+        left = margin + col * (width_per_group + gap)
+        bottom = margin + (nrows_groups - 1 - row) * (height_per_group + gap)
+        width = width_per_group
+        height = height_per_group
+        ag = AxesGrid(f, [left, bottom, width, height], nrows_ncols=(2, 2), axes_pad=0.1, cbar_mode='single', cbar_location='right')
         axes_groups.append(ag)
         cost_map = cost_maps[i]
-        titles_leg = ["Front Left", "Front Right", "Rear Right", "Rear Left"]
+        # titles_leg = ["Front Left", "Front Right", "Rear Right", "Rear Left"]
 
         # Compute per cost_map min and max
         vmin_cm = float(np.min(cost_map[~np.isnan(cost_map)])) if vmin is None else vmin
         vmax_cm = float(np.max(cost_map[~np.isnan(cost_map)])) if vmax is None else vmax
+        spread = vmax_cm - vmin_cm
 
         for j in range(4):
             ax = ag[j]
-            ax.set_title(titles_leg[j])
+            # ax.set_title(titles_leg[j])
             ax.set_xticks([])
             ax.set_yticks([])
             im = ax.imshow(
                 cost_map[j, ::-1, ::-1], cmap="hot", interpolation="nearest", vmin=vmin_cm, vmax=vmax_cm
             )
 
+        # Add colorbar for this AxesGrid
+        cbar = ag.cbar_axes[0].colorbar(im)
+        # cbar.set_label("Action Cost (Lower is better)")
+
         # Add title for the group if provided
         if titles is not None:
-            ag[0].set_title(f"{titles[i]}")
+            center_x = left + width / 2
+            center_y = bottom + height
+            f.text(center_x, center_y, f"{titles[i]} ({spread:.3f})", ha='center', va='bottom', fontsize=12)
 
-    # Add a single colorbar for all subplots
-    if im is not None:
-        all_axes = [ax for ag in axes_groups for ax in ag]
-        cbar = f.colorbar(im, ax=all_axes)
-        cbar.set_label("Action Cost (Lower is better)")
-
+    plt.tight_layout()
     plt.show()

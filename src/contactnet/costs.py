@@ -60,7 +60,7 @@ class SimpleIntegrator(RunningCost):
         super().__init__(weight)
         self.running_cost: None | torch.Tensor = None
         self.cost_function = cost_function
-        self.name = f"Running Cost: {self.cost_function.__name__}"
+        self.name = f"Running: {self.cost_function.__name__}"
         self.updates = 0
 
     def update_running_cost(self, env: ManagerBasedEnv):
@@ -94,7 +94,7 @@ class SimpleTerminalCost(TerminalCost):
     ):
         super().__init__(weight)
         self.cost_function = cost_function
-        self.name = f"Terminal Cost: {self.cost_function.__name__}"
+        self.name = f"Terminal: {self.cost_function.__name__}"
         self.previous_terminal_cost: None | torch.Tensor = None
 
     def terminal_cost(self, env: ManagerBasedEnv) -> torch.Tensor:
@@ -121,7 +121,7 @@ class SimpleTerminalCost(TerminalCost):
 class ControlErrorCost(RunningCost):
     def __init__(self, weight: float, control: torch.Tensor, env: ManagerBasedEnv):
         super().__init__(weight)
-        self.name = "Control Error Cost"
+        self.name = "Running: control_error"
         self.control = control
         root_pose_w = env.scene["robot"].data.root_link_pose_w
         self.initial_position = root_pose_w[:, :3]
