@@ -28,12 +28,12 @@ import numpy as np
 import torch
 from dataclasses import dataclass
 from typing import Any, TypeAlias
-from itertools import count
 
 from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
 from isaaclab.envs.mdp import rewards
+import itertools
 
-import src.contactnet.rewards as cn_rewards
+import src.contactnet.costs as cn_costs
 from src.sim2real import SimInterface
 from src.simulation.util import controls_to_joint_efforts, reset_all_to
 from src.util import VectorPool
@@ -156,9 +156,7 @@ def _contact_sensor_dones(
     return dones
 
 
-def check_dones(
-    env: ManagerBasedEnv, obs: dict[str, dict[str, torch.Tensor]]
-) -> tuple[NDArray[Shape["*"], Bool], np.ndarray]:
+def check_dones(env: ManagerBasedEnv) -> tuple[NDArray[Shape["*"], Bool], np.ndarray]:
     """Check which footstep positions are done.
 
     Args:
@@ -194,134 +192,78 @@ def check_dones(
     # return np.zeros((4 * N * M,), dtype=bool)
 
 
-def get_costs(
-    env: ManagerBasedEnv,
-    control: torch.Tensor,
-    mask: NDArray[Shape["*"], Bool] | None = None,
-) -> NDArray[Shape["*"], Float32]:
-    """Get the cost for a footstep position.
-
-    Args:
-        env (ManagerBasedEnv): The environment to get the costs from.
-        mask (NDArray[Shape["*"], Bool]): Boolean mask of which footstep positions to get costs for.
-            Only used in debug visualization.
-        control (NDArray[Shape["*"], Float32]): Control input for the instance.
-
-    Returns:
-        np.ndarray: Array of costs for each footstep position.
-    """
-    # TODO: add in:
-    # - foot position errors (to avoid slipping)
-    # - support polygon stability (to avoid falling)
-    costs = torch.zeros((env.num_envs,), device=env.scene.device)
-
-    # lin_vel_z_l2_cost = 1.0 * rewards.lin_vel_z_l2(env) / 6  # type: ignore
-    # costs += lin_vel_z_l2_cost
-
-    # ang_vel_xy_l2_cost = 0.05 * rewards.ang_vel_xy_l2(env) / 6  # type: ignore
-    # costs += ang_vel_xy_l2_cost
-
-    # joint_torques_l2_cost = 1.0e-5 * rewards.joint_torques_l2(env) * 5  # type: ignore
-    # costs += joint_torques_l2_cost
-
-    # joint_acc_l2_cost = 1.0e-7 * rewards.joint_acc_l2(env) / 4  # type: ignore
-    # costs += joint_acc_l2_cost
-
-    swing_error_cost = 1.0 * cn_rewards.controller_real_swing_error(env)
-    costs += swing_error_cost
-
-    support_polygon_cost = -1.5 * cn_rewards.support_polygon_area(env)
-    costs += support_polygon_cost
-
-    inscribed_circle_radius = -1.5 * cn_rewards.inscribed_circle_radius(env)
-    costs += inscribed_circle_radius
-
-    foot_distance = 1.0 * cn_rewards.foot_hip_distance(env)
-    costs += foot_distance
-
-    control_alignment = 0.75 * cn_rewards.control_velocity_alignment(env, control)
-    costs += control_alignment
-
-    if args.debug:
-        # skip if less than 10% of the envs are being visualized
-        if mask is not None and np.sum(mask) < 0.5 * env.num_envs:
-            return costs.cpu().numpy()
-        all = torch.stack(
-            [
-                # lin_vel_z_l2_cost,
-                # ang_vel_xy_l2_cost,
-                # joint_torques_l2_cost,
-                # joint_acc_l2_cost,
-                swing_error_cost,
-                support_polygon_cost,
-                inscribed_circle_radius,
-                foot_distance,
-                control_alignment,
-            ]
-        )
-        if mask is not None:
-            vmin = float(torch.min(all[:, mask]))  # type: ignore
-            vmax = float(torch.max(all[:, mask]))  # type: ignore
-        else:
-            vmin = float(torch.min(all))
-            vmax = float(torch.max(all))
-        label_map = {
-            # "lin_vel_z_l2_cost": lin_vel_z_l2_cost,
-            # "ang_vel_xy_l2_cost": ang_vel_xy_l2_cost,
-            # "joint_torques_l2_cost": joint_torques_l2_cost,
-            # "joint_acc_l2_cost": joint_acc_l2_cost,
-            "swing_error_cost": swing_error_cost,
-            "support_polygon_cost": support_polygon_cost,
-            "inscribed_circle_radius": inscribed_circle_radius,
-            "foot_distance": foot_distance,
-            "control_alignment": control_alignment,
-        }
-        for label, cost in label_map.items():
-            cost = cost.cpu().numpy()
-            if mask is not None:
-                cost = np.where(mask, cost, np.nan)
-            view_footstep_cost_map(
-                cost.reshape((4, fs.grid_size[0], fs.grid_size[1])),
-                title=label,
-                # vmin=vmin,
-                # vmax=vmax,
-            )
-
-    # move costs to cpu
-    costs = costs.cpu().numpy()
-    return costs
+class CostManager:
+    def __init__(
+        self,
+        env: ManagerBasedEnv,
+        running_costs: list[cn_costs.RunningCost],
+        terminal_costs: list[cn_costs.TerminalCost],
+    ):
+        self.running_costs = running_costs
+        self.terminal_costs = terminal_costs
+        self.dones = np.zeros((env.num_envs,), dtype=bool)
+        self.done_states = np.full((env.num_envs,), None, dtype=object)
+        self.penalties = np.zeros((env.num_envs,), dtype=np.float32)
+        self.costs: np.ndarray = np.zeros((env.num_envs,), dtype=np.float32)
 
 
-def update_costs(
-    step_cost_map: NDArray[Shape["*"], Float32],
-    dones: NDArray[Shape["*"], Bool],
-    done_states: np.ndarray,
-    env: ManagerBasedEnv,
-    obs: dict[str, dict[str, torch.Tensor]],
-    control: torch.Tensor,
-) -> tuple[NDArray[Shape["4, N, M"], Float32], NDArray[Shape["*"], Bool], np.ndarray]:
-    """Update the costs for the footstep positions that are done.
+    def update(self, env: ManagerBasedEnv):
+        for cost in self.running_costs:
+            cost.update_running_cost(env)
 
-    Args:
-        step_cost_map (NDArray[Shape["*"], Float32]): Current cost map.
-        dones (NDArray[Shape["*"], Bool]): Current done map.
-        done_states (np.ndarray): Current done states.
-        env (ManagerBasedEnv): The environment to get the rewards from.
-        obs (dict): The observations from the environment step.
-        control (NDArray[Shape["*"], Float32]): Control input for the instance.
+        _, new_dones = self.get_dones(env)
+        if np.any(new_dones):
+            costs = np.zeros((env.num_envs,), dtype=np.float32)
+            for func in itertools.chain(self.terminal_costs, self.running_costs):
+                costs += func.terminal_cost(env).cpu().numpy()
+            self.costs[new_dones] = costs[new_dones]
 
-    Returns:
-        NDArray[Shape["*"], Float32]: Updated cost map.
-        NDArray[Shape["*"], Bool]: Updated done map.
-    """
-    currently_done, currently_done_states = check_dones(env, obs)
-    newly_done = np.logical_and(currently_done, np.logical_not(dones))
-    if np.any(newly_done):
-        costs = get_costs(env, mask=newly_done, control=control)
-        step_cost_map[newly_done] = costs[newly_done]
-    all_dones = np.logical_or(dones, currently_done)
-    done_states[newly_done] = currently_done_states[newly_done]
-    return step_cost_map, all_dones, done_states
+    def get_cost_map(self, env: ManagerBasedEnv) -> NDArray[Shape["*"], Float32]:
+        """Get the cost map for the environment.
+
+        Returns:
+            NDArray[Shape["*"], Float32]: The cost map for the environment.
+        """
+        return self.costs + self.penalties
+
+    def get_dones(self, env: ManagerBasedEnv) -> tuple[NDArray[Shape["*"], Bool], NDArray[Shape["*"], Bool]]:
+        """Get the done states for the environment.
+
+        Args:
+            env (ManagerBasedEnv): The environment to get the done states from.
+
+        Returns:
+            NDArray[Shape["*"], Bool]: Array of booleans indicating which robots have finished.
+            NDArray[Shape["*"], Bool]: Array of booleans indicating which robots are newly done.
+        """
+        currently_done, currently_done_states = check_dones(env)
+        newly_done = np.logical_and(currently_done, np.logical_not(self.dones))
+        self.dones = np.logical_or(self.dones, currently_done)
+        self.done_states[newly_done] = currently_done_states[newly_done]
+        return self.dones, newly_done
+
+    def get_done_states(self) -> np.ndarray:
+        """Get the done states for the environment.
+
+        Returns:
+            np.ndarray[None | IsaacStateCPU]: Array of done states for each robot.
+                None: if the robot is not done.
+                IsaacStateCPU: if the robot is done.
+        """
+        return self.done_states
+    
+    def apply_penalty(self, mask: NDArray[Shape["*"], Bool], penalty: float = 1.0):
+        """Apply a penalty to the done states.
+
+        Args:
+            mask (NDArray[Shape["*"], Bool]): Boolean mask of which robots to apply the penalty to.
+            penalty (float, optional): Penalty to apply. Defaults to 1.0.
+        """
+        self.penalties[mask] += penalty
+
+    def debug_plot(self):
+        for cost in itertools.chain(self.running_costs, self.terminal_costs):
+            cost.debug_plot(None)
 
 
 def get_step_cost_map(
@@ -346,7 +288,6 @@ def get_step_cost_map(
         np.ndarray: Costs for each footstep position.
             (4, N, M) where n and m are the number of footstep positions
         np.ndarray: States for each footstep position if done, else None.
-            Note: I'm pretty sure these will never be none, not 100% though
     """
     N, M = fs.grid_size
     controllers: VectorPool[SimInterface] = env.cfg.controllers  # type: ignore
@@ -377,11 +318,25 @@ def get_step_cost_map(
     control_vect = np.tile(control, (env.num_envs, 1))
     control_gpu = torch.from_numpy(control_vect).to(env.scene.device)
 
-    step_cost_map = np.zeros((4 * N * M,), dtype=np.float32)
-    dones = np.zeros((4 * N * M,), dtype=bool)
-    done_states = np.full((4 * N * M,), None, dtype=object)
     max_time_s = 0.25  # max time to simulate
     elapsed_time_s = 0.0
+
+    cost_manager = CostManager(
+        env, 
+        running_costs=[
+            cn_costs.SimpleIntegrator(1, rewards.lin_vel_z_l2),  # type: ignore
+            cn_costs.SimpleIntegrator(0.05, rewards.ang_vel_xy_l2),  # type: ignore
+            cn_costs.SimpleIntegrator(1e-5, rewards.joint_torques_l2),  # type: ignore
+            cn_costs.SimpleIntegrator(1e-7, rewards.joint_acc_l2),  # type: ignore
+        ], 
+        terminal_costs=[
+            cn_costs.SimpleTerminalCost(1, cn_costs.controller_swing_error),
+            cn_costs.SimpleTerminalCost(-1.5, cn_costs.support_polygon_area),
+            cn_costs.SimpleTerminalCost(-1.5, cn_costs.inscribed_circle_radius),
+            cn_costs.SimpleTerminalCost(1, cn_costs.foot_hip_distance),
+            cn_costs.ControlErrorCost(0.75, control_gpu, env)
+        ]
+    )
 
     while simulation_app.is_running() and not shutdown_requested:  # Add flag check
         joint_efforts = controls_to_joint_efforts(control_vect, controllers, env.scene)
@@ -390,19 +345,20 @@ def get_step_cost_map(
         obs, _ = env.step(joint_efforts)  # type: ignore
         obs: dict[str, dict[str, torch.Tensor]] = obs
 
-        step_cost_map, dones, done_states = update_costs(
-            step_cost_map, dones, done_states, env, obs, control=control_gpu
-        )
-        elapsed_time_s += env.cfg.sim.dt * env.cfg.decimation
-        if np.all(dones):
-            break
-        if elapsed_time_s >= max_time_s:
+        cost_manager.update(env)
+        dones, _ = cost_manager.get_dones(env)
+
+        elapsed_time_s += env.step_dt
+
+        if np.all(dones) or elapsed_time_s >= max_time_s:
             # apply a cost penalty for not finishing
-            step_cost_map[~dones] += 1.0
+            cost_manager.apply_penalty(~dones, penalty=1.0)
             break
 
-    step_cost_map = step_cost_map.reshape((4, N, M))
-    done_states = done_states.reshape((4, N, M))
+    if args.debug:
+        cost_manager.debug_plot()
+    step_cost_map = cost_manager.get_cost_map(env).reshape((4, N, M))
+    done_states = cost_manager.get_done_states().reshape((4, N, M))
     return step_cost_map, done_states
 
 
@@ -437,7 +393,7 @@ def main():
     with controllers, torch.inference_mode():
         env_cfg.controllers = controllers
 
-        for i in count():
+        for i in itertools.count():
             logger.info(f"Iteration {i}")
             if not (simulation_app.is_running() and not shutdown_requested):
                 break

@@ -1,12 +1,185 @@
+from typing import Callable
 from unittest.util import three_way_cmp
+
+import numpy as np
 from isaaclab.envs import ManagerBasedEnv
 import torch
 from src.sim2real import SimInterface
 from src.util import VectorPool
-from nptyping import NDArray, Shape, Bool
+from abc import abstractmethod, ABC
+from src.contactnet.debug import view_footstep_cost_map
+from src.util.math import quat_to_euler_np, quat_to_euler_torch
+import src.simulation.cfg.footstep_scanner as fs
 
 
-def controller_real_swing_error(
+class TerminalCost(ABC):
+    @abstractmethod
+    def __init__(self, weight: float = 1.0):
+        self.weight = weight
+
+    @abstractmethod
+    def terminal_cost(self, env: ManagerBasedEnv) -> torch.Tensor:
+        """Calculate the terminal cost for the given environment.
+
+        Args:
+            env (ManagerBasedEnv): The environment to calculate the terminal cost for.
+
+        Returns:
+            torch.Tensor: A tensor of shape (num_envs,) representing the terminal cost for each environment.
+        """
+        pass
+
+    @abstractmethod
+    def debug_plot(self, title: str | None, **kwargs):
+        """Plot the cost map for debugging.
+
+        Args:
+            title (str | None): Title for the plot.
+            **kwargs: Additional keyword arguments for the plotting function.
+        """
+
+
+class RunningCost(TerminalCost):
+    @abstractmethod
+    def update_running_cost(self, env: ManagerBasedEnv):
+        """Update the running cost for the given environment.
+
+        Note: The average running cost is returned with the terminal_cost() function.
+
+        Args:
+            env (ManagerBasedEnv): The environment to calculate the running cost for.
+        """
+        pass
+
+
+class SimpleIntegrator(RunningCost):
+    def __init__(
+        self, weight: float, cost_function: Callable[[ManagerBasedEnv], torch.Tensor]
+    ):
+        super().__init__(weight)
+        self.running_cost: None | torch.Tensor = None
+        self.cost_function = cost_function
+        self.updates = 0
+
+    def update_running_cost(self, env: ManagerBasedEnv):
+        if self.running_cost is None:
+            self.running_cost = torch.zeros((env.num_envs,), device=env.device)
+        self.running_cost += self.cost_function(env) * self.weight
+        self.updates += 1
+
+    def terminal_cost(self, env: ManagerBasedEnv) -> torch.Tensor:
+        if self.running_cost is None:
+            return torch.zeros((env.num_envs,), device=env.device)
+        return self.running_cost / self.updates
+
+    def debug_plot(self, title: str | None, **kwargs):
+        if self.running_cost is None:
+            raise ValueError("Running cost has not been updated yet.")
+        cost = self.terminal_cost(None).cpu().numpy()  # type: ignore
+        title = (
+            title
+            if title is not None
+            else f"Running Cost: {self.cost_function.__name__}"
+        )
+        view_footstep_cost_map(
+            cost.reshape((4, fs.grid_size[0], fs.grid_size[1])), title=title, **kwargs
+        )
+
+
+class SimpleTerminalCost(TerminalCost):
+    def __init__(
+        self, weight: float, cost_function: Callable[[ManagerBasedEnv], torch.Tensor]
+    ):
+        super().__init__(weight)
+        self.cost_function = cost_function
+        self.previous_terminal_cost: None | torch.Tensor = None
+
+    def terminal_cost(self, env: ManagerBasedEnv) -> torch.Tensor:
+        self.previous_terminal_cost = self.cost_function(env) * self.weight
+        return self.previous_terminal_cost
+
+    def debug_plot(self, title: str | None, **kwargs):
+        if self.previous_terminal_cost is None:
+            raise ValueError("Terminal cost has not been calculated yet.")
+        title = (
+            title
+            if title is not None
+            else f"Terminal Cost: {self.cost_function.__name__}"
+        )
+        view_footstep_cost_map(
+            self.previous_terminal_cost.cpu()
+            .numpy()
+            .reshape((4, fs.grid_size[0], fs.grid_size[1])),
+            title=title,
+            **kwargs,
+        )
+
+
+class ControlErrorCost(RunningCost):
+    def __init__(self, weight: float, control: torch.Tensor, env: ManagerBasedEnv):
+        super().__init__(weight)
+        self.control = control
+        root_pose_w = env.scene["robot"].data.root_link_pose_w
+        self.initial_position = root_pose_w[:, :3]
+        initial_quat = root_pose_w[:, 3:]
+        _, _, self.Z_initial = quat_to_euler_torch(
+            initial_quat[:, 0],
+            initial_quat[:, 1],
+            initial_quat[:, 2],
+            initial_quat[:, 3],
+        )
+        self.elapsed_time = 0.0
+        self.previous_terminal_cost: None | torch.Tensor = None
+
+    def update_running_cost(self, env: ManagerBasedEnv):
+        self.elapsed_time += env.step_dt
+
+    def terminal_cost(self, env: ManagerBasedEnv) -> torch.Tensor:
+        root_pose_w = env.scene["robot"].data.root_link_pose_w
+        position = root_pose_w[:, :3]
+        quat = root_pose_w[:, 3:]
+        linear_displacement = position - self.initial_position
+
+        _, _, Z_current = quat_to_euler_torch(
+            quat[:, 0],
+            quat[:, 1],
+            quat[:, 2],
+            quat[:, 3],
+        )
+        angular_displacement = Z_current - self.Z_initial
+        # wrap to [-pi, pi]
+        angular_displacement = (angular_displacement + np.pi) % (2 * np.pi) - np.pi
+
+        linear_velocity = linear_displacement / self.elapsed_time
+        angular_velocity = angular_displacement / self.elapsed_time
+
+        linear_velocity_target = self.control[:, :2]
+        angular_velocity_target = self.control[:, 2:]
+
+        linear_error = torch.norm(
+            linear_velocity[:, :2] - linear_velocity_target, dim=1
+        )
+        angular_error = torch.norm(
+            angular_velocity - angular_velocity_target, dim=1
+        )
+
+        self.previous_terminal_cost = (linear_error + angular_error) * self.weight
+        return self.previous_terminal_cost  # type: ignore
+
+    def debug_plot(self, title: str | None, **kwargs):
+        if self.previous_terminal_cost is None:
+            raise ValueError("Terminal cost has not been calculated yet.")
+        title = title if title is not None else "Control Error Cost"
+        view_footstep_cost_map(
+            self.previous_terminal_cost.cpu()
+            .numpy()
+            .reshape((4, fs.grid_size[0], fs.grid_size[1])),
+            title=title,
+            **kwargs,
+        )
+
+
+def controller_swing_error(
     env: ManagerBasedEnv,
 ) -> torch.Tensor:
     """Error based on the difference between controller swing time and actual swing time.
@@ -82,28 +255,28 @@ def triangle_area(
 
 def polygon_area_2d(vertices: torch.Tensor) -> torch.Tensor:
     """Calculate the area of 2D polygons using the Shoelace formula.
-    
+
     Works for both convex and non-convex (simple) polygons.
     NOTE: this will not work for self-intersecting polygons.
-    
+
     Args:
         vertices (torch.Tensor): Polygon vertices, shape (..., N, 2) where N is number of vertices
-        
+
     Returns:
         torch.Tensor: Areas of the polygons, shape (...)
     """
     # Shift vertices to get pairs (x_i, y_i) and (x_{i+1}, y_{i+1})
     x = vertices[..., 0]  # (..., N)
     y = vertices[..., 1]  # (..., N)
-    
+
     # Roll to get next vertices (cyclically)
     x_next = torch.roll(x, shifts=-1, dims=-1)
     y_next = torch.roll(y, shifts=-1, dims=-1)
-    
+
     # Shoelace formula: 0.5 * |sum(x_i * y_{i+1} - x_{i+1} * y_i)|
     cross_terms = x * y_next - x_next * y
     area = 0.5 * torch.abs(torch.sum(cross_terms, dim=-1))
-    
+
     return area
 
 
@@ -193,6 +366,7 @@ def support_polygon_area(
 
     return areas
 
+
 def inscribed_circle_radius(
     env: ManagerBasedEnv,
 ) -> torch.Tensor:
@@ -228,13 +402,28 @@ def inscribed_circle_radius(
             -1, 3, 3
         )  # (N, 3, 3)
         foot_contact_positions_2d = foot_contact_positions[:, :, :2]  # (N, 3, 2)
-        distances = torch.stack([
-            distance_from_virtual_line(com_position_3, foot_contact_positions_2d[:, 0], foot_contact_positions_2d[:, 1]),
-            distance_from_virtual_line(com_position_3, foot_contact_positions_2d[:, 1], foot_contact_positions_2d[:, 2]),
-            distance_from_virtual_line(com_position_3, foot_contact_positions_2d[:, 2], foot_contact_positions_2d[:, 0]),
-        ], dim=1)  # (N, 3)
+        distances = torch.stack(
+            [
+                distance_from_virtual_line(
+                    com_position_3,
+                    foot_contact_positions_2d[:, 0],
+                    foot_contact_positions_2d[:, 1],
+                ),
+                distance_from_virtual_line(
+                    com_position_3,
+                    foot_contact_positions_2d[:, 1],
+                    foot_contact_positions_2d[:, 2],
+                ),
+                distance_from_virtual_line(
+                    com_position_3,
+                    foot_contact_positions_2d[:, 2],
+                    foot_contact_positions_2d[:, 0],
+                ),
+            ],
+            dim=1,
+        )  # (N, 3)
         radii[three_contacts] = torch.min(distances, dim=1).values
-    
+
     four_contacts = num_contacts == 4
     if torch.any(four_contacts):
         foot_positions_4 = foot_positions[four_contacts]  # (N, 4, 3)
@@ -242,21 +431,33 @@ def inscribed_circle_radius(
         # Reorder feet to avoid self-intersecting polygon: [FL, FR, RL, RR] -> [FR, FL, RL, RR]
         foot_positions_4 = foot_positions_4[:, [1, 0, 2, 3]]  # (N, 4, 3)
         foot_positions_2d = foot_positions_4[..., :2]  # (N, 4, 2)
-        distances = torch.stack([
-            distance_from_virtual_line(com_position_4, foot_positions_2d[:, 0], foot_positions_2d[:, 1]),
-            distance_from_virtual_line(com_position_4, foot_positions_2d[:, 1], foot_positions_2d[:, 2]),
-            distance_from_virtual_line(com_position_4, foot_positions_2d[:, 2], foot_positions_2d[:, 3]),
-            distance_from_virtual_line(com_position_4, foot_positions_2d[:, 3], foot_positions_2d[:, 0]),
-        ], dim=1)  # (N, 4)
+        distances = torch.stack(
+            [
+                distance_from_virtual_line(
+                    com_position_4, foot_positions_2d[:, 0], foot_positions_2d[:, 1]
+                ),
+                distance_from_virtual_line(
+                    com_position_4, foot_positions_2d[:, 1], foot_positions_2d[:, 2]
+                ),
+                distance_from_virtual_line(
+                    com_position_4, foot_positions_2d[:, 2], foot_positions_2d[:, 3]
+                ),
+                distance_from_virtual_line(
+                    com_position_4, foot_positions_2d[:, 3], foot_positions_2d[:, 0]
+                ),
+            ],
+            dim=1,
+        )  # (N, 4)
         radii[four_contacts] = torch.min(distances, dim=1).values
 
     return radii
+
 
 def foot_com_distance(
     env: ManagerBasedEnv,
 ) -> torch.Tensor:
     """Gets the cost associated with the feet being too far away
-    
+
     projects everything to the same z level for R2 distance claculation
 
     Args:
@@ -274,16 +475,15 @@ def foot_com_distance(
     distance = distances.sum(dim=1)
     return distance
 
-def foot_hip_distance(
-    env: ManagerBasedEnv
-) -> torch.Tensor:
+
+def foot_hip_distance(env: ManagerBasedEnv) -> torch.Tensor:
     """Gets the cost associated with the feet being too far away from the hips
 
     projects everything to the same z level for R2 distance claculation
 
     Args:
         env (ManagerBasedEnv): The environment.
-    
+
     Returns:
         torch.Tensor: A float tensor of shape (num_envs,) representing how far the feet are away from the hips.
     """
@@ -296,27 +496,33 @@ def foot_hip_distance(
     distance = distances.sum(dim=1)
     return distance
 
-def control_velocity_alignment(
-    env: ManagerBasedEnv,
-    control: torch.Tensor
-) -> torch.Tensor:
-    """Cost based on the alignment of the commanded velocity and the actual velocity.
 
-    Args:
-        env (ManagerBasedEnv): The environment.
-        control (torch.Tensor): The control input, shape (num_envs, 3) where the last dimension is (vx, vy, omega).
-            control is taken to be in the base frame
+# def control_velocity_alignment(
+#     env: ManagerBasedEnv, control: torch.Tensor
+# ) -> torch.Tensor:
+#     """Cost based on the alignment of the commanded velocity and the actual velocity.
 
-    Returns:
-        torch.Tensor: A float tensor of shape (num_envs,) representing the control velocity alignment cost.
-    """
-    linear_velocity = env.scene["robot"].data.root_lin_vel_b[:, :2]  # (num_envs, 2)
-    angular_velocity = env.scene["robot"].data.root_ang_vel_b[:, 2]  # (num_envs,)
-    commanded_linear_velocity = control[:, :2]  # (num_envs, 2)
-    commanded_angular_velocity = control[:, 2]  # (num_envs,)
-    # Calculate the differences
-    linear_diff = torch.norm(linear_velocity - commanded_linear_velocity, dim=1)  # (num_envs,)
-    angular_diff = torch.abs(angular_velocity - commanded_angular_velocity)  # (num_envs,)
-    # Combine the differences into a single cost
-    cost = linear_diff + angular_diff
-    return cost
+#     TODO: make this be the average over the motion period instead of just the final velocity
+
+#     Args:
+#         env (ManagerBasedEnv): The environment.
+#         control (torch.Tensor): The control input, shape (num_envs, 3) where the last dimension is (vx, vy, omega).
+#             control is taken to be in the base frame
+
+#     Returns:
+#         torch.Tensor: A float tensor of shape (num_envs,) representing the control velocity alignment cost.
+#     """
+#     linear_velocity = env.scene["robot"].data.root_lin_vel_b[:, :2]  # (num_envs, 2)
+#     angular_velocity = env.scene["robot"].data.root_ang_vel_b[:, 2]  # (num_envs,)
+#     commanded_linear_velocity = control[:, :2]  # (num_envs, 2)
+#     commanded_angular_velocity = control[:, 2]  # (num_envs,)
+#     # Calculate the differences
+#     linear_diff = torch.norm(
+#         linear_velocity - commanded_linear_velocity, dim=1
+#     )  # (num_envs,)
+#     angular_diff = torch.abs(
+#         angular_velocity - commanded_angular_velocity
+#     )  # (num_envs,)
+#     # Combine the differences into a single cost
+#     cost = linear_diff + angular_diff
+#     return cost
