@@ -16,6 +16,7 @@ class TerminalCost(ABC):
     @abstractmethod
     def __init__(self, weight: float = 1.0):
         self.weight = weight
+        self.name = "TerminalCost"
 
     @abstractmethod
     def terminal_cost(self, env: ManagerBasedEnv) -> torch.Tensor:
@@ -59,6 +60,7 @@ class SimpleIntegrator(RunningCost):
         super().__init__(weight)
         self.running_cost: None | torch.Tensor = None
         self.cost_function = cost_function
+        self.name = f"Running Cost: {self.cost_function.__name__}"
         self.updates = 0
 
     def update_running_cost(self, env: ManagerBasedEnv):
@@ -79,7 +81,7 @@ class SimpleIntegrator(RunningCost):
         title = (
             title
             if title is not None
-            else f"Running Cost: {self.cost_function.__name__}"
+            else self.name
         )
         view_footstep_cost_map(
             cost.reshape((4, fs.grid_size[0], fs.grid_size[1])), title=title, **kwargs
@@ -92,6 +94,7 @@ class SimpleTerminalCost(TerminalCost):
     ):
         super().__init__(weight)
         self.cost_function = cost_function
+        self.name = f"Terminal Cost: {self.cost_function.__name__}"
         self.previous_terminal_cost: None | torch.Tensor = None
 
     def terminal_cost(self, env: ManagerBasedEnv) -> torch.Tensor:
@@ -104,7 +107,7 @@ class SimpleTerminalCost(TerminalCost):
         title = (
             title
             if title is not None
-            else f"Terminal Cost: {self.cost_function.__name__}"
+            else self.name
         )
         view_footstep_cost_map(
             self.previous_terminal_cost.cpu()
@@ -118,6 +121,7 @@ class SimpleTerminalCost(TerminalCost):
 class ControlErrorCost(RunningCost):
     def __init__(self, weight: float, control: torch.Tensor, env: ManagerBasedEnv):
         super().__init__(weight)
+        self.name = "Control Error Cost"
         self.control = control
         root_pose_w = env.scene["robot"].data.root_link_pose_w
         self.initial_position = root_pose_w[:, :3]
@@ -169,7 +173,7 @@ class ControlErrorCost(RunningCost):
     def debug_plot(self, title: str | None, **kwargs):
         if self.previous_terminal_cost is None:
             raise ValueError("Terminal cost has not been calculated yet.")
-        title = title if title is not None else "Control Error Cost"
+        title = title if title is not None else self.name
         view_footstep_cost_map(
             self.previous_terminal_cost.cpu()
             .numpy()
@@ -190,7 +194,7 @@ def controller_swing_error(
     Returns:
         torch.Tensor: The error in seconds between controller swing time and actual swing time.
     """
-    incomplete_swing_multiplier = 2.0  # penalize incomplete swings more
+    incomplete_swing_multiplier = 1.0  # penalize incomplete swings more
 
     controllers: VectorPool[SimInterface] = env.cfg.controllers  # type: ignore
     controller_swing_durations = controllers.call(

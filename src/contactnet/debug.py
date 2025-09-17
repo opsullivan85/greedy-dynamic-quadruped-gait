@@ -3,6 +3,7 @@ from calendar import c
 import numpy as np
 import matplotlib.pyplot as plt
 from nptyping import Float32, NDArray, Shape
+from mpl_toolkits.axes_grid1 import AxesGrid
 
 
 def view_footstep_cost_map(
@@ -16,8 +17,6 @@ def view_footstep_cost_map(
 
     Args:
         cost_map (NDArray[Shape["4, H, W"], Float32]): The footstep cost map to visualize.
-            Input expects leg ordering: [FR, FL, RR, RL] (Front Right, Front Left, Rear Right, Rear Left)
-            Display shows in FR FL RR RL order with each map rotated 180 degrees.
         selected_idx (tuple): The (foot, row, col) index of the selected footstep in the cost map.
             if present, will highlight the selected footstep on the heatmap.
         title (str, optional): Title for the entire figure. Defaults to None.
@@ -83,3 +82,60 @@ def view_footstep_cost_map(
         plt.suptitle(title)
 
     plt.show(block=True)
+
+def view_multiple_footstep_cost_maps(
+    cost_maps: list[NDArray[Shape["4, H, W"], Float32]],
+    titles: list[str] | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+) -> None:
+    """Visualize multiple footstep cost maps side by side.
+
+    Args:
+        cost_maps (list[NDArray[Shape["4, H, W"], Float32]]): The footstep cost maps to visualize.
+        titles (list[str], optional): Titles for each subplot. Defaults to None.
+        vmin (float, optional): Minimum value for color scale. Defaults to None.
+        vmax (float, optional): Maximum value for color scale. Defaults to None.
+    """
+    M = len(cost_maps)
+    if M == 0:
+        return
+
+    # Figure
+    f = plt.figure(figsize=(6 * M, 8))
+
+    nrows = 2*2
+    ncols = int(M/2)
+
+    axes_groups = []
+    im = None
+    for i in range(M):
+        ag = AxesGrid(f, (nrows, ncols, i + 1), nrows_ncols=(2, 2), axes_pad=0)
+        axes_groups.append(ag)
+        cost_map = cost_maps[i]
+        titles_leg = ["Front Left", "Front Right", "Rear Right", "Rear Left"]
+
+        # Compute per cost_map min and max
+        vmin_cm = float(np.min(cost_map[~np.isnan(cost_map)])) if vmin is None else vmin
+        vmax_cm = float(np.max(cost_map[~np.isnan(cost_map)])) if vmax is None else vmax
+
+        for j in range(4):
+            ax = ag[j]
+            ax.set_title(titles_leg[j])
+            ax.set_xticks([])
+            ax.set_yticks([])
+            im = ax.imshow(
+                cost_map[j, ::-1, ::-1], cmap="hot", interpolation="nearest", vmin=vmin_cm, vmax=vmax_cm
+            )
+
+        # Add title for the group if provided
+        if titles is not None:
+            ag[0].set_title(f"{titles[i]}")
+
+    # Add a single colorbar for all subplots
+    if im is not None:
+        all_axes = [ax for ag in axes_groups for ax in ag]
+        cbar = f.colorbar(im, ax=all_axes)
+        cbar.set_label("Action Cost (Lower is better)")
+
+    plt.show()

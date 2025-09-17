@@ -39,7 +39,7 @@ from src.simulation.util import controls_to_joint_efforts, reset_all_to
 from src.util import VectorPool
 from src.simulation.cfg.quadrupedenv import QuadrupedEnvCfg, get_quadruped_env_cfg
 import src.simulation.cfg.footstep_scanner as fs
-from src.contactnet.debug import view_footstep_cost_map
+from src.contactnet.debug import view_footstep_cost_map, view_multiple_footstep_cost_maps
 from nptyping import Float32, Int32, NDArray, Shape, Bool
 
 logger = logging.getLogger(__name__)
@@ -261,10 +261,13 @@ class CostManager:
         """
         self.penalties[mask] += penalty
 
-    def debug_plot(self):
+    def debug_plot(self, env: ManagerBasedEnv):
+        cost_maps = []
+        titles = []
         for cost in itertools.chain(self.running_costs, self.terminal_costs):
-            cost.debug_plot(None)
-
+            cost_maps.append(cost.terminal_cost(env).cpu().numpy().reshape((4, fs.grid_size[0], fs.grid_size[1])))
+            titles.append(cost.name)
+        view_multiple_footstep_cost_maps(cost_maps, titles=titles)
 
 def get_step_cost_map(
     env: ManagerBasedEnv,
@@ -326,15 +329,15 @@ def get_step_cost_map(
         running_costs=[
             cn_costs.SimpleIntegrator(1, rewards.lin_vel_z_l2),  # type: ignore
             cn_costs.SimpleIntegrator(0.05, rewards.ang_vel_xy_l2),  # type: ignore
-            cn_costs.SimpleIntegrator(1e-5, rewards.joint_torques_l2),  # type: ignore
+            cn_costs.SimpleIntegrator(4e-4, rewards.joint_torques_l2),  # type: ignore
             cn_costs.SimpleIntegrator(1e-7, rewards.joint_acc_l2),  # type: ignore
+            cn_costs.ControlErrorCost(0.75, control_gpu, env)
         ], 
         terminal_costs=[
-            cn_costs.SimpleTerminalCost(1, cn_costs.controller_swing_error),
+            # cn_costs.SimpleTerminalCost(0.5, cn_costs.controller_swing_error),
             cn_costs.SimpleTerminalCost(-1.5, cn_costs.support_polygon_area),
             cn_costs.SimpleTerminalCost(-1.5, cn_costs.inscribed_circle_radius),
-            cn_costs.SimpleTerminalCost(1, cn_costs.foot_hip_distance),
-            cn_costs.ControlErrorCost(0.75, control_gpu, env)
+            cn_costs.SimpleTerminalCost(0.5, cn_costs.foot_hip_distance),
         ]
     )
 
@@ -356,7 +359,7 @@ def get_step_cost_map(
             break
 
     if args.debug:
-        cost_manager.debug_plot()
+        cost_manager.debug_plot(env)
     step_cost_map = cost_manager.get_cost_map(env).reshape((4, N, M))
     done_states = cost_manager.get_done_states().reshape((4, N, M))
     return step_cost_map, done_states
