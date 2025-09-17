@@ -1,5 +1,3 @@
-from ast import Raise
-from calendar import c
 import numpy as np
 import matplotlib.pyplot as plt
 from nptyping import Float32, NDArray, Shape
@@ -25,9 +23,10 @@ def view_footstep_cost_map(
     """
     plt.clf()
 
-    # Compute global min and max for consistent colorbar
-    vmin = float(np.min(cost_map[~np.isnan(cost_map)])) if vmin is None else vmin
-    vmax = float(np.max(cost_map[~np.isnan(cost_map)])) if vmax is None else vmax
+    # Compute global min and max for consistent colorbar, excluding NaN and inf
+    valid_mask = ~np.isnan(cost_map) & ~np.isinf(cost_map)
+    vmin = float(np.min(cost_map[valid_mask])) if vmin is None else vmin
+    vmax = float(np.max(cost_map[valid_mask])) if vmax is None else vmax
 
     # Store subplot references
     axes = []
@@ -129,9 +128,10 @@ def view_multiple_footstep_cost_maps(
         cost_map = cost_maps[i]
         # titles_leg = ["Front Left", "Front Right", "Rear Right", "Rear Left"]
 
-        # Compute per cost_map min and max
-        vmin_cm = float(np.min(cost_map[~np.isnan(cost_map)])) if vmin is None else vmin
-        vmax_cm = float(np.max(cost_map[~np.isnan(cost_map)])) if vmax is None else vmax
+        # Compute per cost_map min and max, excluding NaN and inf
+        valid_mask = ~np.isnan(cost_map) & ~np.isinf(cost_map)
+        vmin_cm = float(np.min(cost_map[valid_mask])) if vmin is None else vmin
+        vmax_cm = float(np.max(cost_map[valid_mask])) if vmax is None else vmax
         spread = vmax_cm - vmin_cm
 
         for j in range(4):
@@ -153,5 +153,5 @@ def view_multiple_footstep_cost_maps(
             center_y = bottom + height
             f.text(center_x, center_y, f"{titles[i]} ({spread:.3f})", ha='center', va='bottom', fontsize=12)
 
-    plt.tight_layout()
-    plt.show()
+    # plt.tight_layout()
+    plt.show(block=True)

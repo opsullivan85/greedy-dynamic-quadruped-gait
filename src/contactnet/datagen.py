@@ -27,9 +27,9 @@ import multiprocessing
 import numpy as np
 import torch
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import Any
 
-from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
+from isaaclab.envs import ManagerBasedEnv
 from isaaclab.envs.mdp import rewards
 import itertools
 
@@ -39,8 +39,11 @@ from src.simulation.util import controls_to_joint_efforts, reset_all_to
 from src.util import VectorPool
 from src.simulation.cfg.quadrupedenv import QuadrupedEnvCfg, get_quadruped_env_cfg
 import src.simulation.cfg.footstep_scanner as fs
-from src.contactnet.debug import view_footstep_cost_map, view_multiple_footstep_cost_maps
-from nptyping import Float32, Int32, NDArray, Shape, Bool
+from src.contactnet.debug import (
+    view_footstep_cost_map,
+    view_multiple_footstep_cost_maps,
+)
+from nptyping import Float32, NDArray, Shape, Bool
 
 logger = logging.getLogger(__name__)
 
@@ -206,12 +209,10 @@ class CostManager:
         self.penalties = np.zeros((env.num_envs,), dtype=np.float32)
         self.costs: np.ndarray = np.zeros((env.num_envs,), dtype=np.float32)
 
-
-    def update(self, env: ManagerBasedEnv):
+    def update(self, env: ManagerBasedEnv, new_dones: NDArray[Shape["*"], Bool]):
         for cost in self.running_costs:
             cost.update_running_cost(env)
 
-        _, new_dones = self.get_dones(env)
         if np.any(new_dones):
             costs = np.zeros((env.num_envs,), dtype=np.float32)
             for func in itertools.chain(self.terminal_costs, self.running_costs):
@@ -226,7 +227,9 @@ class CostManager:
         """
         return self.costs + self.penalties
 
-    def get_dones(self, env: ManagerBasedEnv) -> tuple[NDArray[Shape["*"], Bool], NDArray[Shape["*"], Bool]]:
+    def get_dones(
+        self, env: ManagerBasedEnv
+    ) -> tuple[NDArray[Shape["*"], Bool], NDArray[Shape["*"], Bool]]:
         """Get the done states for the environment.
 
         Args:
@@ -251,7 +254,7 @@ class CostManager:
                 IsaacStateCPU: if the robot is done.
         """
         return self.done_states
-    
+
     def apply_penalty(self, mask: NDArray[Shape["*"], Bool], penalty: float = 1.0):
         """Apply a penalty to the done states.
 
@@ -265,9 +268,15 @@ class CostManager:
         cost_maps = []
         titles = []
         for cost in itertools.chain(self.running_costs, self.terminal_costs):
-            cost_maps.append(cost.terminal_cost(env).cpu().numpy().reshape((4, fs.grid_size[0], fs.grid_size[1])))
+            cost_maps.append(
+                cost.terminal_cost(env)
+                .cpu()
+                .numpy()
+                .reshape((4, fs.grid_size[0], fs.grid_size[1]))
+            )
             titles.append(cost.name)
         view_multiple_footstep_cost_maps(cost_maps, titles=titles)
+
 
 def get_step_cost_map(
     env: ManagerBasedEnv,
@@ -325,20 +334,24 @@ def get_step_cost_map(
     elapsed_time_s = 0.0
 
     cost_manager = CostManager(
-        env, 
+        env,
         running_costs=[
-            cn_costs.SimpleIntegrator(0.8, rewards.lin_vel_z_l2),  # type: ignore
-            cn_costs.SimpleIntegrator(0.04, rewards.ang_vel_xy_l2),  # type: ignore
-            cn_costs.SimpleIntegrator(4e-4, rewards.joint_torques_l2),  # type: ignore
-            cn_costs.SimpleIntegrator(5e-8, rewards.joint_acc_l2),  # type: ignore
-            cn_costs.ControlErrorCost(0.35, control_gpu, env)
-        ], 
+            # cn_costs.SimpleIntegrator(0.8, rewards.lin_vel_z_l2),  # type: ignore
+            cn_costs.BallanceFootCosts(
+                cn_costs.SimpleIntegrator(0.06, rewards.ang_vel_xy_l2)  # type: ignore
+            ),
+            # cn_costs.SimpleIntegrator(4e-4, rewards.joint_torques_l2),  # type: ignore
+            # cn_costs.SimpleIntegrator(5e-8, rewards.joint_acc_l2),  # type: ignore
+            cn_costs.BallanceFootCosts(
+                cn_costs.ControlErrorCost(1.0, control_gpu, env)
+            ),
+        ],
         terminal_costs=[
             # cn_costs.SimpleTerminalCost(0.5, cn_costs.controller_swing_error),
-            cn_costs.SimpleTerminalCost(-1.9, cn_costs.support_polygon_area),
-            cn_costs.SimpleTerminalCost(-1.2, cn_costs.inscribed_circle_radius),
-            cn_costs.SimpleTerminalCost(0.5, cn_costs.foot_hip_distance),
-        ]
+            # cn_costs.SimpleTerminalCost(-1.5, cn_costs.support_polygon_area),
+            cn_costs.SimpleTerminalCost(-1.5, cn_costs.inscribed_circle_radius),
+            cn_costs.SimpleTerminalCost(1.0, cn_costs.foot_hip_distance),
+        ],
     )
 
     while simulation_app.is_running() and not shutdown_requested:  # Add flag check
@@ -348,14 +361,14 @@ def get_step_cost_map(
         obs, _ = env.step(joint_efforts)  # type: ignore
         obs: dict[str, dict[str, torch.Tensor]] = obs
 
-        cost_manager.update(env)
-        dones, _ = cost_manager.get_dones(env)
+        dones, new_dones = cost_manager.get_dones(env)
+        cost_manager.update(env, new_dones)
 
         elapsed_time_s += env.step_dt
 
         if np.all(dones) or elapsed_time_s >= max_time_s:
             # apply a cost penalty for not finishing
-            cost_manager.apply_penalty(~dones, penalty=1.0)
+            cost_manager.apply_penalty(~dones, float('inf'))
             break
 
     if args.debug:
@@ -408,7 +421,7 @@ def main():
             )
             state_cost_map.append((start_state.to_numpy(), cost_map))
 
-            # pick new start state from one of the 10 lowest cost terminal states
+            # pick new start state from one of the n lowest cost terminal states
             flat_cost_map = cost_map.flatten()
             pick_from_best_n = 5
             lowest_indices = np.argpartition(flat_cost_map, pick_from_best_n)[

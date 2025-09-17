@@ -1,5 +1,4 @@
 from typing import Callable
-from unittest.util import three_way_cmp
 
 import numpy as np
 from isaaclab.envs import ManagerBasedEnv
@@ -8,7 +7,7 @@ from src.sim2real import SimInterface
 from src.util import VectorPool
 from abc import abstractmethod, ABC
 from src.contactnet.debug import view_footstep_cost_map
-from src.util.math import quat_to_euler_np, quat_to_euler_torch
+from src.util.math import quat_to_euler_torch
 import src.simulation.cfg.footstep_scanner as fs
 
 
@@ -118,6 +117,44 @@ class SimpleTerminalCost(TerminalCost):
         )
 
 
+class BallanceFootCosts(RunningCost):
+    """Ballances the footstep cost map such that each foot has the same average cost.
+
+    can help with metrics that inherently favor certian feet (front/back)
+    """
+    def __init__(self, cost_class: RunningCost):
+        super().__init__(1.0)
+        self.name = cost_class.name + " (bal)"
+        self.cost_class = cost_class
+    
+    def update_running_cost(self, env: ManagerBasedEnv):
+        self.cost_class.update_running_cost(env)
+    
+    def terminal_cost(self, env: ManagerBasedEnv) -> torch.Tensor:
+        cost = self.cost_class.terminal_cost(env)
+        # assume 4 feet, an even amount of costs each
+        # Reshape to (4, num_locations) assuming foot-major flattening, then transpose to (num_locations, 4)
+        num_locations = cost.shape[0] // 4
+        cost_reshaped: torch.Tensor = cost.reshape(4, num_locations).T
+        foot_means = torch.mean(cost_reshaped, dim=0)
+        overall_mean = torch.mean(foot_means)
+        # adjust all to overall mean
+        foot_adjustments = overall_mean - foot_means
+        adjusted_cost = cost_reshaped + foot_adjustments
+        # Transpose back and flatten
+        return adjusted_cost.T.reshape(-1)
+    
+    def debug_plot(self, title: str | None, **kwargs):
+        cost = self.terminal_cost(None).cpu().numpy()  # type: ignore
+        title = (
+            title
+            if title is not None
+            else self.name
+        )
+        view_footstep_cost_map(
+            cost.reshape((4, fs.grid_size[0], fs.grid_size[1])), title=title, **kwargs
+        )
+
 class ControlErrorCost(RunningCost):
     def __init__(self, weight: float, control: torch.Tensor, env: ManagerBasedEnv):
         super().__init__(weight)
@@ -181,6 +218,25 @@ class ControlErrorCost(RunningCost):
             title=title,
             **kwargs,
         )
+
+class ControllerSwingErrorCost(RunningCost):
+    def __init__(self, weight: float, env: ManagerBasedEnv):
+        super().__init__(weight)
+        self.name = "Running: controller_swing_error"
+
+        controllers: VectorPool[SimInterface] = env.cfg.controllers  # type: ignore
+        self.controller_swing_durations = controllers.call(
+            SimInterface.get_swing_durations,
+            mask=None,
+        )
+        self.swing_durations = np.zeros_like(self.controller_swing_durations)
+
+    def update_running_cost(self, env: ManagerBasedEnv):
+        self.swing_durations += env.step_dt
+
+    def terminal_cost(self, env: ManagerBasedEnv) -> torch.Tensor:
+        error = np.abs(self.controller_swing_durations - self.swing_durations)
+        return torch.tensor(error.sum(axis=1) * self.weight, device=env.device)
 
 
 def controller_swing_error(
@@ -485,6 +541,9 @@ def foot_hip_distance(env: ManagerBasedEnv) -> torch.Tensor:
 
     projects everything to the same z level for R2 distance claculation
 
+    technically we are using the thigh positions as a proxy for the hip positions
+    the have what you would expect to be the hip positions
+
     Args:
         env (ManagerBasedEnv): The environment.
 
@@ -492,7 +551,7 @@ def foot_hip_distance(env: ManagerBasedEnv) -> torch.Tensor:
         torch.Tensor: A float tensor of shape (num_envs,) representing how far the feet are away from the hips.
     """
     foot_positions = env.scene["robot"].data.body_pos_w[:, env.cfg.foot_indices, :2]  # type: ignore
-    hip_positions = env.scene["robot"].data.body_pos_w[:, env.cfg.hip_indices, :2]  # type: ignore
+    hip_positions = env.scene["robot"].data.body_pos_w[:, env.cfg.thigh_indices, :2]  # type: ignore
 
     # get the scalar euclidean distance
     distances = torch.norm(foot_positions - hip_positions, dim=2)
