@@ -336,21 +336,23 @@ def get_step_cost_map(
     cost_manager = CostManager(
         env,
         running_costs=[
-            # cn_costs.SimpleIntegrator(0.8, rewards.lin_vel_z_l2),  # type: ignore
             cn_costs.BallanceFootCosts(
-                cn_costs.SimpleIntegrator(0.06, rewards.ang_vel_xy_l2)  # type: ignore
+                cn_costs.SimpleIntegrator(0.8, rewards.lin_vel_z_l2)  # type: ignore
+            ),
+            cn_costs.BallanceFootCosts(
+                cn_costs.SimpleIntegrator(0.03, rewards.ang_vel_xy_l2)  # type: ignore
             ),
             # cn_costs.SimpleIntegrator(4e-4, rewards.joint_torques_l2),  # type: ignore
             # cn_costs.SimpleIntegrator(5e-8, rewards.joint_acc_l2),  # type: ignore
             cn_costs.BallanceFootCosts(
-                cn_costs.ControlErrorCost(1.0, control_gpu, env)
+                cn_costs.ControlErrorCost(0.5, control_gpu, env)
             ),
         ],
         terminal_costs=[
             # cn_costs.SimpleTerminalCost(0.5, cn_costs.controller_swing_error),
             # cn_costs.SimpleTerminalCost(-1.5, cn_costs.support_polygon_area),
             cn_costs.SimpleTerminalCost(-1.5, cn_costs.inscribed_circle_radius),
-            cn_costs.SimpleTerminalCost(1.0, cn_costs.foot_hip_distance),
+            cn_costs.SimpleTerminalCost(0.7, cn_costs.foot_hip_distance),
         ],
     )
 

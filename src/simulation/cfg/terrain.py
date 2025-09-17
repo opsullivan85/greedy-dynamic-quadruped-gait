@@ -91,7 +91,7 @@ VoidTerrainImporterCfg: Callable[[], TerrainImporterCfg] = lambda: TerrainImport
     # https://isaac-sim.github.io/IsaacLab/v2.1.0/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg
     terrain_generator=TerrainGeneratorCfg(
         size=(10, 10),
-        difficulty_range=(0.0, 0.0),
+        difficulty_range=(0.3, 0.3),
         horizontal_scale=0.015,
         slope_threshold=0,
         sub_terrains={
