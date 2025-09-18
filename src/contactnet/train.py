@@ -122,7 +122,7 @@ class QuadrupedDataset(Dataset):
         state_flat = self._flatten_state(node.state)
 
         # remove inf values from cost map
-        node.cost_map = np.where(np.isinf(node.cost_map), 100, node.cost_map)  # type: ignore
+        node.cost_map = np.where(np.isinf(node.cost_map), 2, node.cost_map)  # type: ignore
 
         # Flatten cost map from (4, 5, 5) to (4, 25) for 4 separate foot models
         cost_map_flat = node.cost_map.reshape(4, -1)  # Shape: (4, 25) # type: ignore
@@ -262,8 +262,8 @@ class QuadrupedTrainer:
         timestamp = datetime.now().isoformat(timespec="seconds").replace(":", "-")
 
         # Create directories
-        self.log_dir = PROJECT_ROOT / "runs" / f"quadruped_{timestamp}"
-        self.checkpoint_dir = PROJECT_ROOT / "checkpoints" / f"quadruped_{timestamp}"
+        self.log_dir = PROJECT_ROOT / "training" / "runs" / f"quadruped_{timestamp}"
+        self.checkpoint_dir = PROJECT_ROOT / "training" / "checkpoints" / f"quadruped_{timestamp}"
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize tensorboard writer
@@ -305,7 +305,7 @@ class QuadrupedTrainer:
             # Log batch-level metrics
             if batch_idx % 100 == 0:
                 logger.info(
-                    f"epoch {epoch}, batch {batch_idx}/{num_batches}, loss: {loss.item():.6f}"
+                    f"epoch {epoch+1}, batch {batch_idx}/{num_batches}, loss: {loss.item():.6f}"
                 )
 
                 # Log to tensorboard

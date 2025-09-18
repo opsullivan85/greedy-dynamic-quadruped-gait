@@ -10,6 +10,7 @@ if __name__ == "__main__":
     # data-gen
     parser.add_argument("--datagen", action="store_true", help="Generate data")
     parser.add_argument("--train", action="store_true", help="Train model")
+    parser.add_argument("--evaluate", action="store_true", help="Evaluate model")
     parser.add_argument("--data-finder", action="store_true", help="Find data files")
     parser.add_argument("--dfs-debug", action="store_true", help="Run DFS debug")
     args = parser.parse_known_args()
@@ -23,6 +24,10 @@ if __name__ == "__main__":
         elif used_args.train:
             from src.contactnet import train
             train.main()
+
+        elif used_args.evaluate:
+            from src.contactnet import evaluate
+            evaluate.main()
         
         elif used_args.dfs_debug:
             from src.contactnet import datagen
