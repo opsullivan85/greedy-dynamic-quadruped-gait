@@ -15,7 +15,7 @@ class ProjectRelativeFormatter(logging.Formatter):
             path = Path(record.pathname).resolve()
             record.relpath = path.relative_to(PROJECT_ROOT)
         except Exception:
-            logger.debug(f"Failed to make path relative: {record.pathname}")
+            # logger.debug(f"failed to make path relative: {record.pathname}")
             record.relpath = record.pathname  # fallback to absolute
         return super().format(record)
 
@@ -50,6 +50,7 @@ log_dir.mkdir(exist_ok=True)
 
 # Timestamped log file
 timestamp = datetime.now().isoformat(timespec="seconds").replace(":", "-")
+"""Holds the timestamp of when the program started."""
 log_file = log_dir / f"{timestamp}.log"
 
 # Root logger

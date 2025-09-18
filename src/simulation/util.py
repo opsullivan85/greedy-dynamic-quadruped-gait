@@ -113,7 +113,7 @@ def _ensure_shape(arr: torch.Tensor, expected_shape: tuple):
         return arr
     else:
         raise ValueError(
-            f"Array must have shape {expected_shape[1:],} or {expected_shape}, got {arr.shape}"
+            f"Array must have shape {expected_shape[1:]} or {expected_shape}, got {arr.shape}"
         )
 
 
@@ -125,6 +125,11 @@ def reset_all_to(
 ):
     """
     Reset all environments in the ManagerBasedEnv to the specified joint positions, velocities, and body states.
+
+    WARNING:
+        If you try to pass the tensors as a reference to the env state, it will not work correctly.
+        You MUST pass in a copy of the data. If you pass a reference, the env will modify the data
+        when it resets, and you will not get the desired behavior.
 
     Parameters:
     - env: ManagerBasedEnv instance
