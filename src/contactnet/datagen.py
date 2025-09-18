@@ -1,8 +1,8 @@
 import argparse
 import signal
-from tracemalloc import start
 
 from isaaclab.app import AppLauncher
+from src import PROJECT_ROOT, timestamp
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a robot.")
@@ -10,9 +10,22 @@ parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a ro
 #     "--num_envs", type=int, default=1, help="Number of environments to spawn."
 # )
 parser.add_argument("--debug", action="store_true", help="Enable debug views.")
-parser.add_argument("--interactive-plots", action="store_true", help="Enable interactive plots.")
-parser.add_argument("--num-control-input-experiments", type=int, default=100, help="Number of control input experiments to run.")
-parser.add_argument("--control-input-batch-size", type=int, default=100, help="Leaves to explore for each control input")
+parser.add_argument(
+    "--interactive-plots", action="store_true", help="Enable interactive plots."
+)
+parser.add_argument(
+    "--num-experiments",
+    type=int,
+    default=100,
+    help="Number of control input experiments to run.",
+)
+parser.add_argument(
+    "--batch-size",
+    type=int,
+    default=100,
+    help="Leaves to explore for each control input",
+)
+parser.add_argument("--control-switch-interval", type=int, default=50, help="How often to switch control input")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -47,6 +60,7 @@ from src.contactnet.debug import (
 )
 from src.contactnet import tree
 from nptyping import Float32, NDArray, Shape, Bool
+import pickle
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +257,9 @@ class CostManager:
                 .reshape((4, fs.grid_size[0], fs.grid_size[1]))
             )
             titles.append(cost.name)
-        view_multiple_footstep_cost_maps(cost_maps, titles=titles, save_figure=not args.interactive_plots)
+        view_multiple_footstep_cost_maps(
+            cost_maps, titles=titles, save_figure=not args.interactive_plots
+        )
 
 
 def get_step_cost_map(
@@ -306,11 +322,11 @@ def get_step_cost_map(
         running_costs=[
             cn_costs.BallanceFootCosts(
                 ballance_factor=0.75,
-                cost_class=cn_costs.SimpleIntegrator(0.8, rewards.lin_vel_z_l2)  # type: ignore
+                cost_class=cn_costs.SimpleIntegrator(0.8, rewards.lin_vel_z_l2),  # type: ignore
             ),
             cn_costs.BallanceFootCosts(
                 ballance_factor=0.75,
-                cost_class=cn_costs.SimpleIntegrator(0.04, rewards.ang_vel_xy_l2)  # type: ignore
+                cost_class=cn_costs.SimpleIntegrator(0.04, rewards.ang_vel_xy_l2),  # type: ignore
             ),
             cn_costs.BallanceFootCosts(
                 ballance_factor=0.75,
@@ -322,7 +338,7 @@ def get_step_cost_map(
             ),
             cn_costs.BallanceFootCosts(
                 ballance_factor=0.5,
-                cost_class=cn_costs.ControlErrorCost(0.3, control_gpu, env)
+                cost_class=cn_costs.ControlErrorCost(0.3, control_gpu, env),
             ),
         ],
         terminal_costs=[
@@ -347,7 +363,7 @@ def get_step_cost_map(
 
         if np.all(dones) or elapsed_time_s >= max_time_s:
             # apply a cost penalty for not finishing
-            cost_manager.apply_penalty(~dones, float('inf'))
+            cost_manager.apply_penalty(~dones, float("inf"))
             break
 
     if args.debug:
@@ -355,6 +371,36 @@ def get_step_cost_map(
     step_cost_map = cost_manager.get_cost_map(env).reshape((4, N, M))
     done_states = cost_manager.get_done_states().reshape((4, N, M))
     return step_cost_map, done_states
+
+
+def get_control_vector() -> np.ndarray:
+    rng = np.random.default_rng()
+    # calculate a random control input
+    max_yaw = 0.2
+    max_control_input = 0.2
+
+    yaw_rate = rng.uniform(-max_yaw, max_yaw)
+    # rotate a random control input value by a random rotation
+    control_input_value = rng.uniform(0, max_control_input)
+    rotation = np.array(
+        [
+            [
+                np.cos(rng.uniform(0, 2 * np.pi)),
+                -np.sin(rng.uniform(0, 2 * np.pi)),
+            ],
+            [
+                np.sin(rng.uniform(0, 2 * np.pi)),
+                np.cos(rng.uniform(0, 2 * np.pi)),
+            ],
+        ]
+    )
+    control_vector = rotation @ np.array([control_input_value, 0.0])
+    control_vector = control_vector.flatten()
+
+    control = np.array(
+        [control_vector[0], control_vector[1], yaw_rate], dtype=np.float32
+    )
+    return control
 
 
 def main():
@@ -373,75 +419,116 @@ def main():
         debug_logging=False,
     )
 
-    state: tree.IsaacStateCPU = tree.IsaacStateTorch(
+    default_state: tree.IsaacStateCPU = tree.IsaacStateTorch(
         joint_pos=env.scene["robot"].data.default_joint_pos[0],
         joint_vel=env.scene["robot"].data.default_joint_vel[0],
         body_state=env.scene["robot"].data.default_root_state[0],
     ).to_numpy()
-    state.body_state[2] += -0.075  # slightly above ground (default state is in the air)
+    default_state.body_state[
+        2
+    ] += -0.075  # slightly above ground (default state is in the air)
 
-    root = tree.TreeNode(
-        data=tree.StepNode(
-            state=state,
-            action=None,
-            cost_map=None,
-        ),
-    )
 
-    control = np.array([0.1, 0.0, 0.0], dtype=np.float32)
+    training_data: list[tree.StepNode] = []
+
+    data_dir = PROJECT_ROOT / "data"
+    data_dir.mkdir(exist_ok=True)
+    data_path = data_dir / f"{timestamp}.pkl"
 
     # simulate physics
     with controllers, torch.inference_mode():
         env_cfg.controllers = controllers
 
-        for i in range(args.control_input_batch_size):
-            logger.info(f"iteration {i}")
-            if not (simulation_app.is_running() and not shutdown_requested):
-                break
+        for i in range(args.num_experiments):
+            control = get_control_vector()
+            logger.info(f"control input: {control}")
 
-            leaf = root.get_living_leaf()
-            state = leaf.data.state
-            # grab initial state from robot 0
-            cost_map, terminal_states = get_step_cost_map(
-                env,
-                control=control,
-                state=state.to_torch(env.scene.device),
-            )
-            leaf.data.cost_map = cost_map
-            # if more than n of the terminal states are None, mark as dead
-            num_done = np.sum([s is not None for s in terminal_states.flatten()])
-            bad_state_threshold = 0.5
-            if num_done < (bad_state_threshold * terminal_states.size):
-                leaf.mark_dead(3)
-                logger.info(f"leaf {leaf} is dead (only {num_done} / {terminal_states.size} done)")
-                continue
-            branching_factor = 10
-            leaf.add_best_children(
-                n=branching_factor,
-                cost_map=cost_map,
-                terminal_states=terminal_states,
+            # setup new tree root
+            root = tree.TreeNode(
+                data=tree.StepNode(
+                    state=default_state,
+                    cost_map=None,
+                ),
+                action=None,
             )
 
-            logger.info(tree.anytree.RenderTree(root))
-
-            if args.debug:
-                selected_idx = leaf.data.action if leaf.data.action is not None else None
-                if selected_idx is not None:
-                    selected_idx = np.unravel_index(selected_idx, cost_map.shape)
-                view_footstep_cost_map(
-                    cost_map,
-                    # note this is the previously selected action...
-                    selected_idx=selected_idx,
-                    title="Footstep Cost Map",
-                    save_figure=not args.interactive_plots,
+            for j in range(args.batch_size):
+                logger.info(
+                    f"iteration {i+1}/{args.num_experiments}:{j+1}/{args.batch_size}"
                 )
+                if not (simulation_app.is_running() and not shutdown_requested):
+                    break
+
+                # switch control input every n iterations
+                if j % args.control_switch_interval == 0 and j > 0:
+                    control = get_control_vector()
+                    logger.info(f"new control input: {control}")
+
+                # get a random state from the tree
+                leaf = root.get_living_leaf()
+                state = leaf.data.state
+                cost_map, terminal_states = get_step_cost_map(
+                    env,
+                    control=control,
+                    state=state.to_torch(env.scene.device),
+                )
+                # update cost map
+                leaf.data.cost_map = cost_map
+
+                # if more than n of the terminal states are None, mark as dead
+                num_done = np.sum([s is not None for s in terminal_states.flatten()])
+                bad_state_threshold = 0.5
+                if num_done < (bad_state_threshold * terminal_states.size):
+                    leaf.mark_dead(3)
+                    logger.info(
+                        f"leaf {leaf} is dead (only {num_done} / {terminal_states.size} done)"
+                    )
+                    continue
+
+                # add best n children
+                branching_factor = 10
+                leaf.add_best_children(
+                    n=branching_factor,
+                    cost_map=cost_map,
+                    terminal_states=terminal_states,
+                )
+
+                # logger.info(tree.anytree.RenderTree(root))
+
+                if not (j+1) % 10:
+                    # log depth distribution
+                    distribution = root.depth_distribution()
+                    logger.info(f"depth distribution: {distribution}")
+
+                if args.debug:
+                    selected_idx = (
+                        leaf.action if leaf.action is not None else None
+                    )
+                    if selected_idx is not None:
+                        selected_idx = np.unravel_index(selected_idx, cost_map.shape)
+                    view_footstep_cost_map(
+                        cost_map,
+                        # note this is the previously selected action...
+                        selected_idx=selected_idx,
+                        title="Footstep Cost Map",
+                        save_figure=not args.interactive_plots,
+                    )
+
+            # collect all non-dead nodes
+            nodes = root.get_explored_nodes()
+            training_data.extend([n.data for n in nodes])
+            logger.info(f"collected {len(nodes)}/{args.batch_size} nodes, total {len(training_data)}")
+
+            # save data
+            with open(data_path, "wb") as f:
+                pickle.dump(training_data, f)
+            logger.info(f"saved {len(training_data)} data points to {data_path}")
 
     env_cfg.controllers = None
     del controllers
 
     # close the environment
     env.close()
-
 
 
 def dfs_debug():
@@ -460,7 +547,9 @@ def dfs_debug():
         debug_logging=False,
     )
 
-    state_cost_map: list[tuple[tree.IsaacStateCPU, NDArray[Shape["4, N, M"], Float32]]] = []
+    state_cost_map: list[
+        tuple[tree.IsaacStateCPU, NDArray[Shape["4, N, M"], Float32]]
+    ] = []
 
     start_state: tree.IsaacStateTorch = tree.IsaacStateTorch(
         env.scene["robot"].data.joint_pos[0],

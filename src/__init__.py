@@ -50,6 +50,7 @@ log_dir.mkdir(exist_ok=True)
 
 # Timestamped log file
 timestamp = datetime.now().isoformat(timespec="seconds").replace(":", "-")
+"""Holds the timestamp of when the program started."""
 log_file = log_dir / f"{timestamp}.log"
 
 # Root logger

@@ -43,31 +43,31 @@ class IsaacStateTorch:
         )
 
 
+@dataclass()
 class StepNode:
-    def __init__(self, state: IsaacStateCPU, action: int | None, cost_map: NDArray[Shape["4, N, M"], Float32] | None = None):
-        """Initialize a StepNode.
+    """Initialize a StepNode.
 
-        Args:
-            state (IsaacStateCPU): The state of the robot.
-            cost_map (NDArray[Shape["4, N, M"], Float32] | None): The cost map for the step.
-                None if not computed yet.
-            action (int | None): The action taken. None if root node.
-        """
-        self.state = state
-        self.cost_map = cost_map
-        self.action = action
+    Args:
+        state (IsaacStateCPU): The state of the robot.
+        cost_map (NDArray[Shape["4, N, M"], Float32] | None): The cost map for the step.
+            None if not computed yet.
+    """
+    state: IsaacStateCPU
+    cost_map: NDArray[Shape["4, N, M"], Float32] | None
 
 
 class TreeNode(anytree.NodeMixin):
-    def __init__(self, data: StepNode, dead: bool = False, **kwargs) -> None:
+    def __init__(self, data: StepNode, dead: bool = False, action: int | None = None, **kwargs) -> None:
         """Initialize a TreeNode.
 
         Args:
             data (StepNode): The data associated with the node.
             dead (bool): Whether the node is dead.
+            action (int | None): The action taken. None if root node.
         """
         self.data = data
         self.dead = dead
+        self.action = action
 
         # dynamically set all properties from kwargs
         # NodeMixin uses parent and child setters instead of __init__
@@ -139,8 +139,25 @@ class TreeNode(anytree.NodeMixin):
         for index in lowest_indices:
             state: IsaacStateCPU = terminal_states.flatten()[index]  # type: ignore
             action = int(index)
-            child_data = StepNode(state=state, action=action, cost_map=None)
-            TreeNode(data=child_data, parent=self)
+            child_data = StepNode(state=state, cost_map=None)
+            TreeNode(data=child_data, parent=self, action=action)
+
+    def depth_distribution(self) -> dict[int, int]:
+        """Get the distribution of depths of all explored, non-dead nodes in the subtree rooted at this node.
+
+        Returns:
+            dict[int, int]: Number of nodes at each depth.
+        """
+        distribution: dict[int, int] = {}
+        nodes = [n for n in self.descendants if not n.dead and not n.is_leaf] + ([self] if not self.dead else [])
+        for node in nodes:
+            depth = node.depth
+            if depth not in distribution:
+                distribution[depth] = 0
+            distribution[depth] += 1
+        # re-order by depth
+        distribution = dict(sorted(distribution.items()))
+        return distribution
 
 
 # def expand(node):
