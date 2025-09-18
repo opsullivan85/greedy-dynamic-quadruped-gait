@@ -108,7 +108,7 @@ def main():
     env_cfg: QuadrupedEnvCfg = get_quadruped_env_cfg(args_cli.num_envs, args_cli.device)
     # setup RL environment
     env = ManagerBasedEnv(cfg=env_cfg)
-    iterations_between_mpc = 10  # 50 Hz MPC
+    iterations_between_mpc = 5  # 50 Hz MPC
     controllers = VectorPool(
         instances=args_cli.num_envs,
         cls=SimInterface,

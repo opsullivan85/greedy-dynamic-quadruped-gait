@@ -364,7 +364,7 @@ def main():
     env_cfg: QuadrupedEnvCfg = get_quadruped_env_cfg(num_envs, args.device)
     # setup RL environment
     env = ManagerBasedEnv(cfg=env_cfg)
-    iterations_between_mpc = 10  # 50 Hz MPC
+    iterations_between_mpc = 5  # 50 Hz MPC
     controllers = VectorPool(
         instances=num_envs,
         cls=SimInterface,
@@ -394,7 +394,7 @@ def main():
     with controllers, torch.inference_mode():
         env_cfg.controllers = controllers
 
-        for i in range(args.num_data_points):
+        for i in range(args.control_input_batch_size):
             logger.info(f"iteration {i}")
             if not (simulation_app.is_running() and not shutdown_requested):
                 break
@@ -451,7 +451,7 @@ def dfs_debug():
     env_cfg: QuadrupedEnvCfg = get_quadruped_env_cfg(num_envs, args.device)
     # setup RL environment
     env = ManagerBasedEnv(cfg=env_cfg)
-    iterations_between_mpc = 10  # 50 Hz MPC
+    iterations_between_mpc = 5  # 50 Hz MPC
     controllers = VectorPool(
         instances=num_envs,
         cls=SimInterface,
