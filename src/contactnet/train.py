@@ -30,7 +30,7 @@ class QuadrupedDataset(Dataset):
         Args:
             data_path: Path to the pickled data file
         """
-        logger.info(f"Loading data from {data_paths}")
+        logger.info(f"loading data from {data_paths}")
 
         self.training_data: List[StepNode] = []
         self.metadatas: List[dict] = []
@@ -53,7 +53,7 @@ class QuadrupedDataset(Dataset):
             node for node in self.training_data if node.cost_map is not None
         ]
 
-        logger.info(f"Loaded {len(self.training_data)} valid training samples")
+        logger.info(f"loaded {len(self.training_data)} valid training samples")
 
         # Calculate input dimensions from the first sample
         sample_state = self._flatten_state(self.training_data[0].state)
@@ -63,8 +63,8 @@ class QuadrupedDataset(Dataset):
             self.metadatas[0]["footstep_grid_size"][0]
             * self.metadatas[0]["footstep_grid_size"][1]
         )
-        logger.info(f"Input dimension: {self.input_dim}")
-        logger.info(f"Output dimension: {self.output_dim}")
+        logger.info(f"input dimension: {self.input_dim}")
+        logger.info(f"output dimension: {self.output_dim}")
 
     def _flatten_state(self, state: IsaacStateCPU) -> np.ndarray:
         """
@@ -89,9 +89,9 @@ class QuadrupedDataset(Dataset):
             for entry in matching_entries:
                 if metadata[entry] != first_metadata[entry]:
                     logger.warning(
-                        f"Critical metadata entry '{entry}' does not match across data files: {metadata[entry]} != {first_metadata[entry]}"
+                        f"metadata entry '{entry}' does not match across data files: {metadata[entry]} != {first_metadata[entry]}"
                     )
-                    logger.info("Use --data-info to inspect data files.")
+                    logger.info("use --data-info to inspect data files.")
                     return False
 
         if any(
@@ -101,7 +101,7 @@ class QuadrupedDataset(Dataset):
             ]
         ):
             logger.warning(
-                "Warning: Git hashes do not match across data files.\n\tBe sure to verify compatibility manually."
+                "git hashes do not match across data files.\n\tBe sure to verify compatibility manually."
             )
 
         return True
@@ -120,6 +120,9 @@ class QuadrupedDataset(Dataset):
 
         # Flatten the state for input
         state_flat = self._flatten_state(node.state)
+
+        # remove inf values from cost map
+        node.cost_map = np.where(np.isinf(node.cost_map), 100, node.cost_map)  # type: ignore
 
         # Flatten cost map from (4, 5, 5) to (4, 25) for 4 separate foot models
         cost_map_flat = node.cost_map.reshape(4, -1)  # Shape: (4, 25) # type: ignore
@@ -183,7 +186,7 @@ class QuadrupedModel(nn.Module):
             [FootModel(input_dim, output_dim_per_foot) for _ in range(4)]
         )
 
-        logger.info(f"Created quadruped model with {len(self.foot_models)} foot models")
+        logger.info(f"created quadruped model with {len(self.foot_models)} foot models")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -266,8 +269,8 @@ class QuadrupedTrainer:
         # Initialize tensorboard writer
         self.writer = SummaryWriter(log_dir=self.log_dir)
 
-        logger.info(f"Tensorboard logs: {self.log_dir}")
-        logger.info(f"Checkpoints: {self.checkpoint_dir}")
+        logger.info(f"tensorboard logs: {self.log_dir}")
+        logger.info(f"checkpoints: {self.checkpoint_dir}")
 
     def train_epoch(self, epoch: int) -> float:
         """Train for one epoch."""
@@ -302,7 +305,7 @@ class QuadrupedTrainer:
             # Log batch-level metrics
             if batch_idx % 100 == 0:
                 logger.info(
-                    f"Epoch {epoch}, Batch {batch_idx}/{num_batches}, Loss: {loss.item():.6f}"
+                    f"epoch {epoch}, batch {batch_idx}/{num_batches}, loss: {loss.item():.6f}"
                 )
 
                 # Log to tensorboard
@@ -330,7 +333,7 @@ class QuadrupedTrainer:
                 total_loss += loss.item()
 
         avg_loss = total_loss / len(self.val_loader)
-        logger.info(f"Validation Loss: {avg_loss:.6f}")
+        logger.info(f"validation loss: {avg_loss:.6f}")
 
         return avg_loss
 
@@ -352,18 +355,18 @@ class QuadrupedTrainer:
         if is_best:
             best_path = self.checkpoint_dir / "best_model.pt"
             torch.save(checkpoint, best_path)
-            logger.info(f"New best model saved with loss: {loss:.6f}")
+            logger.info(f"new best model saved with loss: {loss:.6f}")
 
     def train(self, num_epochs: int = 100):
         """Main training loop."""
-        logger.info(f"Starting training for {num_epochs} epochs")
-        logger.info(f"Device: {self.device}")
+        logger.info(f"starting training for {num_epochs} epochs")
+        logger.info(f"device: {self.device}")
         logger.info(
-            f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}"
+            f"model parameters: {sum(p.numel() for p in self.model.parameters()):,}"
         )
 
         for epoch in range(num_epochs):
-            logger.info(f"Epoch {epoch + 1}/{num_epochs}")
+            logger.info(f"epoch {epoch + 1}/{num_epochs}")
 
             # Training
             train_loss = self.train_epoch(epoch)
@@ -382,7 +385,7 @@ class QuadrupedTrainer:
             self.writer.add_scalar("Training/Learning_Rate", current_lr, epoch)
 
             logger.info(
-                f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, LR: {current_lr:.2e}"
+                f"train loss: {train_loss:.6f}, val loss: {val_loss:.6f}, LR: {current_lr:.2e}"
             )
 
             # Early stopping and checkpointing
@@ -401,10 +404,10 @@ class QuadrupedTrainer:
 
             # Early stopping
             if self.patience_counter >= self.early_stop_patience:
-                logger.info(f"Early stopping at epoch {epoch + 1}")
+                logger.info(f"early stopping at epoch {epoch + 1}")
                 break
 
-        logger.info("Training completed!")
+        logger.info("training completed!")
         self.writer.close()
 
 
@@ -416,7 +419,7 @@ def main():
 
     # Device selection
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"Using device: {device}")
+    logger.info(f"using device: {device}")
 
     # Load dataset
     dataset = QuadrupedDataset([
@@ -450,7 +453,7 @@ def main():
         pin_memory=True if device == "cuda" else False,
     )
 
-    logger.info(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
+    logger.info(f"train samples: {len(train_dataset)}, val samples: {len(val_dataset)}")
 
     # Create model
     model = QuadrupedModel(input_dim=dataset.input_dim, output_dim_per_foot=dataset.output_dim)

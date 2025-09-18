@@ -9,6 +9,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ContactNet Main Entry Point")
     # data-gen
     parser.add_argument("--datagen", action="store_true", help="Generate data")
+    parser.add_argument("--train", action="store_true", help="Train model")
     parser.add_argument("--data-finder", action="store_true", help="Find data files")
     parser.add_argument("--dfs-debug", action="store_true", help="Run DFS debug")
     args = parser.parse_known_args()
@@ -18,6 +19,10 @@ if __name__ == "__main__":
         if used_args.datagen:
             from src.contactnet import datagen
             datagen.main()
+
+        elif used_args.train:
+            from src.contactnet import train
+            train.main()
         
         elif used_args.dfs_debug:
             from src.contactnet import datagen
