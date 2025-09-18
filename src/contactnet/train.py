@@ -1,0 +1,468 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
+import pickle
+import numpy as np
+import logging
+from pathlib import Path
+from typing import List, Tuple
+from datetime import datetime
+from src.contactnet.tree import IsaacStateCPU, StepNode
+from src import PROJECT_ROOT
+
+logger = logging.getLogger(__name__)
+
+
+class QuadrupedDataset(Dataset):
+    """
+    Custom Dataset for quadruped locomotion data.
+
+    This dataset handles the loading and preprocessing of StepNode data,
+    flattening the state information and cost maps for neural network training.
+    """
+
+    def __init__(self, data_paths: list[Path]):
+        """
+        Initialize the dataset.
+
+        Args:
+            data_path: Path to the pickled data file
+        """
+        logger.info(f"Loading data from {data_paths}")
+
+        self.training_data: List[StepNode] = []
+        self.metadatas: List[dict] = []
+
+        for data_path in data_paths:
+            with open(data_path, "rb") as f:
+                data = pickle.load(f)
+
+            self.training_data.extend(data["training_data"])
+            self.metadatas.append(data["metadata"])
+
+        if not self._metadatas_compatable():
+            raise ValueError(
+                "Incompatible metadata across data files. See logs for details."
+            )
+
+        # Filter out samples with None cost_map
+        # shouldn't be nessesary but just in case
+        self.training_data = [
+            node for node in self.training_data if node.cost_map is not None
+        ]
+
+        logger.info(f"Loaded {len(self.training_data)} valid training samples")
+
+        # Calculate input dimensions from the first sample
+        sample_state = self._flatten_state(self.training_data[0].state)
+        self.input_dim = len(sample_state)
+        # we know the metadatas match for this entry
+        self.output_dim = (
+            self.metadatas[0]["footstep_grid_size"][0]
+            * self.metadatas[0]["footstep_grid_size"][1]
+        )
+        logger.info(f"Input dimension: {self.input_dim}")
+        logger.info(f"Output dimension: {self.output_dim}")
+
+    def _flatten_state(self, state: IsaacStateCPU) -> np.ndarray:
+        """
+        Flatten the robot state into a single vector.
+
+        This combines joint positions, velocities, and body state into one
+        feature vector for the neural network input.
+        """
+        return np.concatenate([state.joint_pos, state.joint_vel, state.body_state])
+
+    def _metadatas_compatable(self) -> bool:
+        """Check if all metadata entries are compatiable."""
+        first_metadata = self.metadatas[0]
+        matching_entries = [
+            "footstep_grid_size",
+            "footstep_grid_resolution",
+            "step_dt",
+            "physics_dt",
+            "iterations_between_mpc",
+        ]
+        for metadata in self.metadatas[1:]:
+            for entry in matching_entries:
+                if metadata[entry] != first_metadata[entry]:
+                    logger.warning(
+                        f"Critical metadata entry '{entry}' does not match across data files: {metadata[entry]} != {first_metadata[entry]}"
+                    )
+                    logger.info("Use --data-info to inspect data files.")
+                    return False
+
+        if any(
+            [
+                metadata["git_hash"] != first_metadata["git_hash"]
+                for metadata in self.metadatas[1:]
+            ]
+        ):
+            logger.warning(
+                "Warning: Git hashes do not match across data files.\n\tBe sure to verify compatibility manually."
+            )
+
+        return True
+
+    def __len__(self) -> int:
+        return len(self.training_data)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get a single training sample.
+
+        Returns:
+            Tuple of (flattened_state, cost_maps) as tensors
+        """
+        node = self.training_data[idx]
+
+        # Flatten the state for input
+        state_flat = self._flatten_state(node.state)
+
+        # Flatten cost map from (4, 5, 5) to (4, 25) for 4 separate foot models
+        cost_map_flat = node.cost_map.reshape(4, -1)  # Shape: (4, 25) # type: ignore
+
+        return torch.FloatTensor(state_flat), torch.FloatTensor(cost_map_flat)
+
+
+class FootModel(nn.Module):
+    """
+    Individual neural network model for a single foot.
+    """
+
+    def __init__(self, input_dim: int, output_dim: int, dropout_rate: float = 0.1):
+        super(FootModel, self).__init__()
+
+        self.network = nn.Sequential(
+            # First dense layer
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            # Second dense layer
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            # Third dense layer
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            # Output layer
+            nn.Linear(64, output_dim),
+        )
+
+        # Initialize weights using Xavier/Glorot initialization
+        # This helps with gradient flow and training stability
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        """Initialize network weights using Xavier normal initialization."""
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_normal_(module.weight)
+            nn.init.constant_(module.bias, 0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.network(x)
+
+
+class QuadrupedModel(nn.Module):
+    """
+    Combined model containing 4 foot models in a 'black box' architecture.
+
+    This model trains 4 separate foot models simultaneously while keeping
+    them logically separate for potential future modifications (e.g., mirror symmetry).
+    """
+
+    def __init__(self, input_dim: int, output_dim_per_foot: int):
+        super(QuadrupedModel, self).__init__()
+
+        # Create 4 separate models for each foot
+        # This design allows for future mirror symmetry implementation
+        self.foot_models = nn.ModuleList(
+            [FootModel(input_dim, output_dim_per_foot) for _ in range(4)]
+        )
+
+        logger.info(f"Created quadruped model with {len(self.foot_models)} foot models")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through all 4 foot models.
+
+        Args:
+            x: Input state tensor of shape (batch_size, input_dim)
+
+        Returns:
+            Combined output tensor of shape (batch_size, 4, output_dim_per_foot)
+        """
+        outputs = []
+
+        # Process input through each foot model
+        for foot_model in self.foot_models:
+            output = foot_model(x)
+            outputs.append(output)
+
+        # Stack outputs: (batch_size, 4, output_dim_per_foot)
+        return torch.stack(outputs, dim=1)
+
+
+class QuadrupedTrainer:
+    """
+    Training class that handles the complete training pipeline.
+
+    Implements best practices including:
+    - Learning rate scheduling
+    - Early stopping
+    - Model checkpointing
+    - Tensorboard logging
+    - Gradient clipping for stability
+    """
+
+    def __init__(
+        self,
+        model: QuadrupedModel,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None = None,
+        device: str = "cuda",
+    ):
+        self.model = model.to(device)
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.device = device
+
+        # Loss function - MSE is appropriate for regression tasks
+        self.criterion = nn.MSELoss()
+
+        # Adam optimizer with weight decay for regularization
+        self.optimizer = optim.AdamW(
+            self.model.parameters(), lr=1e-3, weight_decay=1e-4
+        )
+
+        # Learning rate scheduler - reduces LR when loss plateaus
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode="min",
+            factor=0.5,
+            patience=10,
+        )
+
+        # Setup logging and checkpointing
+        self.setup_logging()
+
+        # Early stopping parameters
+        self.best_loss = float("inf")
+        self.patience_counter = 0
+        self.early_stop_patience = 20
+
+    def setup_logging(self):
+        """Setup tensorboard logging and checkpoint directories."""
+        timestamp = datetime.now().isoformat(timespec="seconds").replace(":", "-")
+
+        # Create directories
+        self.log_dir = PROJECT_ROOT / "runs" / f"quadruped_{timestamp}"
+        self.checkpoint_dir = PROJECT_ROOT / "checkpoints" / f"quadruped_{timestamp}"
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize tensorboard writer
+        self.writer = SummaryWriter(log_dir=self.log_dir)
+
+        logger.info(f"Tensorboard logs: {self.log_dir}")
+        logger.info(f"Checkpoints: {self.checkpoint_dir}")
+
+    def train_epoch(self, epoch: int) -> float:
+        """Train for one epoch."""
+        self.model.train()
+        total_loss = 0.0
+        num_batches = len(self.train_loader)
+
+        for batch_idx, (states, cost_maps) in enumerate(self.train_loader):
+            states = states.to(self.device)
+            cost_maps = cost_maps.to(self.device)  # Shape: (batch_size, 4, 25)
+
+            # Zero gradients
+            self.optimizer.zero_grad()
+
+            # Forward pass
+            outputs = self.model(states)  # Shape: (batch_size, 4, 25)
+
+            # Calculate loss
+            loss = self.criterion(outputs, cost_maps)
+
+            # Backward pass
+            loss.backward()
+
+            # Gradient clipping to prevent exploding gradients
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
+            # Update weights
+            self.optimizer.step()
+
+            total_loss += loss.item()
+
+            # Log batch-level metrics
+            if batch_idx % 100 == 0:
+                logger.info(
+                    f"Epoch {epoch}, Batch {batch_idx}/{num_batches}, Loss: {loss.item():.6f}"
+                )
+
+                # Log to tensorboard
+                global_step = epoch * num_batches + batch_idx
+                self.writer.add_scalar("Training/Batch_Loss", loss.item(), global_step)
+
+        avg_loss = total_loss / num_batches
+        return avg_loss
+
+    def validate(self, epoch: int) -> float:
+        """Validate the model."""
+        if self.val_loader is None:
+            return float("inf")
+
+        self.model.eval()
+        total_loss = 0.0
+
+        with torch.no_grad():
+            for states, cost_maps in self.val_loader:
+                states = states.to(self.device)
+                cost_maps = cost_maps.to(self.device)
+
+                outputs = self.model(states)
+                loss = self.criterion(outputs, cost_maps)
+                total_loss += loss.item()
+
+        avg_loss = total_loss / len(self.val_loader)
+        logger.info(f"Validation Loss: {avg_loss:.6f}")
+
+        return avg_loss
+
+    def save_checkpoint(self, epoch: int, loss: float, is_best: bool = False):
+        """Save model checkpoint."""
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "scheduler_state_dict": self.scheduler.state_dict(),
+            "loss": loss,
+        }
+
+        # Regular checkpoint
+        checkpoint_path = self.checkpoint_dir / f"checkpoint_epoch_{epoch}.pt"
+        torch.save(checkpoint, checkpoint_path)
+
+        # Best model checkpoint
+        if is_best:
+            best_path = self.checkpoint_dir / "best_model.pt"
+            torch.save(checkpoint, best_path)
+            logger.info(f"New best model saved with loss: {loss:.6f}")
+
+    def train(self, num_epochs: int = 100):
+        """Main training loop."""
+        logger.info(f"Starting training for {num_epochs} epochs")
+        logger.info(f"Device: {self.device}")
+        logger.info(
+            f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}"
+        )
+
+        for epoch in range(num_epochs):
+            logger.info(f"Epoch {epoch + 1}/{num_epochs}")
+
+            # Training
+            train_loss = self.train_epoch(epoch)
+
+            # Validation
+            val_loss = self.validate(epoch)
+
+            # Learning rate scheduling
+            self.scheduler.step(val_loss if self.val_loader else train_loss)
+            current_lr = self.optimizer.param_groups[0]["lr"]
+
+            # Logging
+            self.writer.add_scalar("Training/Epoch_Loss", train_loss, epoch)
+            if self.val_loader:
+                self.writer.add_scalar("Validation/Loss", val_loss, epoch)
+            self.writer.add_scalar("Training/Learning_Rate", current_lr, epoch)
+
+            logger.info(
+                f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, LR: {current_lr:.2e}"
+            )
+
+            # Early stopping and checkpointing
+            monitor_loss = val_loss if self.val_loader else train_loss
+            is_best = monitor_loss < self.best_loss
+
+            if is_best:
+                self.best_loss = monitor_loss
+                self.patience_counter = 0
+            else:
+                self.patience_counter += 1
+
+            # Save checkpoint every 10 epochs or if best
+            if (epoch + 1) % 10 == 0 or is_best:
+                self.save_checkpoint(epoch, monitor_loss, is_best)
+
+            # Early stopping
+            if self.patience_counter >= self.early_stop_patience:
+                logger.info(f"Early stopping at epoch {epoch + 1}")
+                break
+
+        logger.info("Training completed!")
+        self.writer.close()
+
+
+def main():
+    """Main training script."""
+    # Set random seeds for reproducibility
+    torch.manual_seed(42)
+    np.random.seed(42)
+
+    # Device selection
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(f"Using device: {device}")
+
+    # Load dataset
+    dataset = QuadrupedDataset([
+        PROJECT_ROOT / "data" / "2025-09-18T11-38-21.pkl",
+        PROJECT_ROOT / "data" / "2025-09-18T11-45-07.pkl",
+    ])
+
+    # Split dataset (80% train, 20% validation)
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        dataset, [train_size, val_size]
+    )
+
+    # Create data loaders
+    # Batch size should be tuned based on available memory and dataset size
+    batch_size = 32
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True if device == "cuda" else False,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True if device == "cuda" else False,
+    )
+
+    logger.info(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
+
+    # Create model
+    model = QuadrupedModel(input_dim=dataset.input_dim, output_dim_per_foot=dataset.output_dim)
+
+    # Create trainer and start training
+    trainer = QuadrupedTrainer(
+        model=model, train_loader=train_loader, val_loader=val_loader, device=device
+    )
+
+    # Train the model
+    trainer.train(num_epochs=100)
+
+
+if __name__ == "__main__":
+    main()
