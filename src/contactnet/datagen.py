@@ -11,6 +11,8 @@ parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a ro
 # )
 parser.add_argument("--debug", action="store_true", help="Enable debug views.")
 parser.add_argument("--interactive-plots", action="store_true", help="Enable interactive plots.")
+parser.add_argument("--num-control-input-experiments", type=int, default=100, help="Number of control input experiments to run.")
+parser.add_argument("--control-input-batch-size", type=int, default=100, help="Leaves to explore for each control input")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -27,7 +29,6 @@ import multiprocessing
 
 import numpy as np
 import torch
-from dataclasses import dataclass
 from typing import Any
 
 from isaaclab.envs import ManagerBasedEnv
@@ -44,6 +45,7 @@ from src.contactnet.debug import (
     view_footstep_cost_map,
     view_multiple_footstep_cost_maps,
 )
+from src.contactnet import tree
 from nptyping import Float32, NDArray, Shape, Bool
 
 logger = logging.getLogger(__name__)
@@ -62,41 +64,6 @@ def signal_handler(sig, frame):
 
 # Set up the signal handler for SIGINT (Ctrl+C)
 signal.signal(signal.SIGINT, signal_handler)
-
-
-# frozen allows for hashing
-@dataclass(frozen=True)
-class IsaacStateCPU:
-    """Class for keeping track of an Isaac state."""
-
-    joint_pos: np.ndarray
-    joint_vel: np.ndarray
-    body_state: np.ndarray
-
-    def to_torch(self, device: Any) -> "IsaacStateTorch":
-        """Convert to torch tensors on the specified device."""
-        return IsaacStateTorch(
-            joint_pos=torch.from_numpy(self.joint_pos).to(device),
-            joint_vel=torch.from_numpy(self.joint_vel).to(device),
-            body_state=torch.from_numpy(self.body_state).to(device),
-        )
-
-
-@dataclass()
-class IsaacStateTorch:
-    """Class for keeping track of an Isaac state."""
-
-    joint_pos: torch.Tensor
-    joint_vel: torch.Tensor
-    body_state: torch.Tensor
-
-    def to_numpy(self) -> IsaacStateCPU:
-        """Convert to numpy arrays."""
-        return IsaacStateCPU(
-            joint_pos=self.joint_pos.cpu().numpy(),
-            joint_vel=self.joint_vel.cpu().numpy(),
-            body_state=self.body_state.cpu().numpy(),
-        )
 
 
 def get_step_locations_hip() -> NDArray[Shape["4, N, M ,2"], Float32]:
@@ -184,7 +151,7 @@ def check_dones(env: ManagerBasedEnv) -> tuple[NDArray[Shape["*"], Bool], np.nda
     indices = np.argwhere(dones)
     for index in indices:
         i = index[0]
-        states[i] = IsaacStateTorch(
+        states[i] = tree.IsaacStateTorch(
             env.scene["robot"].data.joint_pos[i],
             env.scene["robot"].data.joint_vel[i],
             env.scene["robot"].data.root_state_w[i],
@@ -282,7 +249,7 @@ class CostManager:
 def get_step_cost_map(
     env: ManagerBasedEnv,
     control: np.ndarray,
-    state: IsaacStateTorch,
+    state: tree.IsaacStateTorch,
 ) -> tuple[NDArray[Shape["4, N, M"], Float32], NDArray[Shape["4, N, M"], Any]]:
     """Evaluates an instance
 
@@ -337,16 +304,25 @@ def get_step_cost_map(
     cost_manager = CostManager(
         env,
         running_costs=[
-            # cn_costs.BallanceFootCosts(
-            #     cn_costs.SimpleIntegrator(0.8, rewards.lin_vel_z_l2)  # type: ignore
-            # ),
-            # cn_costs.BallanceFootCosts(
-            #     cn_costs.SimpleIntegrator(0.03, rewards.ang_vel_xy_l2)  # type: ignore
-            # ),
-            # cn_costs.SimpleIntegrator(4e-4, rewards.joint_torques_l2),  # type: ignore
-            # cn_costs.SimpleIntegrator(5e-8, rewards.joint_acc_l2),  # type: ignore
             cn_costs.BallanceFootCosts(
-                cn_costs.ControlErrorCost(0.5, control_gpu, env)
+                ballance_factor=0.75,
+                cost_class=cn_costs.SimpleIntegrator(0.8, rewards.lin_vel_z_l2)  # type: ignore
+            ),
+            cn_costs.BallanceFootCosts(
+                ballance_factor=0.75,
+                cost_class=cn_costs.SimpleIntegrator(0.04, rewards.ang_vel_xy_l2)  # type: ignore
+            ),
+            cn_costs.BallanceFootCosts(
+                ballance_factor=0.75,
+                cost_class=cn_costs.SimpleIntegrator(4e-4, rewards.joint_torques_l2),  # type: ignore
+            ),
+            cn_costs.BallanceFootCosts(
+                ballance_factor=0.75,
+                cost_class=cn_costs.SimpleIntegrator(4e-8, rewards.joint_acc_l2),  # type: ignore
+            ),
+            cn_costs.BallanceFootCosts(
+                ballance_factor=0.5,
+                cost_class=cn_costs.ControlErrorCost(0.3, control_gpu, env)
             ),
         ],
         terminal_costs=[
@@ -382,7 +358,6 @@ def get_step_cost_map(
 
 
 def main():
-    """Main function."""
     # 4 since there are 4 feet
     num_envs = 4 * fs.grid_size[0] * fs.grid_size[1]
     # create environment configuration
@@ -398,9 +373,96 @@ def main():
         debug_logging=False,
     )
 
-    state_cost_map: list[tuple[IsaacStateCPU, NDArray[Shape["4, N, M"], Float32]]] = []
+    state: tree.IsaacStateCPU = tree.IsaacStateTorch(
+        joint_pos=env.scene["robot"].data.default_joint_pos[0],
+        joint_vel=env.scene["robot"].data.default_joint_vel[0],
+        body_state=env.scene["robot"].data.default_root_state[0],
+    ).to_numpy()
+    state.body_state[2] += -0.075  # slightly above ground (default state is in the air)
 
-    start_state: IsaacStateTorch = IsaacStateTorch(
+    root = tree.TreeNode(
+        data=tree.StepNode(
+            state=state,
+            action=None,
+            cost_map=None,
+        ),
+    )
+
+    control = np.array([0.1, 0.0, 0.0], dtype=np.float32)
+
+    # simulate physics
+    with controllers, torch.inference_mode():
+        env_cfg.controllers = controllers
+
+        for i in range(args.num_data_points):
+            logger.info(f"iteration {i}")
+            if not (simulation_app.is_running() and not shutdown_requested):
+                break
+
+            leaf = root.get_living_leaf()
+            state = leaf.data.state
+            # grab initial state from robot 0
+            cost_map, terminal_states = get_step_cost_map(
+                env,
+                control=control,
+                state=state.to_torch(env.scene.device),
+            )
+            leaf.data.cost_map = cost_map
+            # if more than n of the terminal states are None, mark as dead
+            num_done = np.sum([s is not None for s in terminal_states.flatten()])
+            bad_state_threshold = 0.5
+            if num_done < (bad_state_threshold * terminal_states.size):
+                leaf.mark_dead(3)
+                logger.info(f"leaf {leaf} is dead (only {num_done} / {terminal_states.size} done)")
+                continue
+            branching_factor = 10
+            leaf.add_best_children(
+                n=branching_factor,
+                cost_map=cost_map,
+                terminal_states=terminal_states,
+            )
+
+            logger.info(tree.anytree.RenderTree(root))
+
+            if args.debug:
+                selected_idx = leaf.data.action if leaf.data.action is not None else None
+                if selected_idx is not None:
+                    selected_idx = np.unravel_index(selected_idx, cost_map.shape)
+                view_footstep_cost_map(
+                    cost_map,
+                    # note this is the previously selected action...
+                    selected_idx=selected_idx,
+                    title="Footstep Cost Map",
+                    save_figure=not args.interactive_plots,
+                )
+
+    env_cfg.controllers = None
+    del controllers
+
+    # close the environment
+    env.close()
+
+
+
+def dfs_debug():
+    # 4 since there are 4 feet
+    num_envs = 4 * fs.grid_size[0] * fs.grid_size[1]
+    # create environment configuration
+    env_cfg: QuadrupedEnvCfg = get_quadruped_env_cfg(num_envs, args.device)
+    # setup RL environment
+    env = ManagerBasedEnv(cfg=env_cfg)
+    iterations_between_mpc = 10  # 50 Hz MPC
+    controllers = VectorPool(
+        instances=num_envs,
+        cls=SimInterface,
+        dt=env_cfg.sim.dt * env_cfg.decimation,  # 500 Hz leg PD control
+        iterations_between_mpc=iterations_between_mpc,
+        debug_logging=False,
+    )
+
+    state_cost_map: list[tuple[tree.IsaacStateCPU, NDArray[Shape["4, N, M"], Float32]]] = []
+
+    start_state: tree.IsaacStateTorch = tree.IsaacStateTorch(
         env.scene["robot"].data.joint_pos[0],
         env.scene["robot"].data.joint_vel[0],
         env.scene["robot"].data.root_state_w[0],
@@ -432,7 +494,7 @@ def main():
             ]
             chosen_index = np.random.choice(lowest_indices)
             # the terminal states array is technically of IsaacStates
-            state: IsaacStateCPU = terminal_states.flatten()[chosen_index]  # type: ignore
+            state: tree.IsaacStateCPU = terminal_states.flatten()[chosen_index]  # type: ignore
             start_state = state.to_torch(env.scene.device)
 
             if args.debug:

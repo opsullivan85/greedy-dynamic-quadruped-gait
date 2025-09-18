@@ -109,6 +109,7 @@ def view_footstep_cost_map(
         image_file = image_dir / f"{timestamp}_cost-map.png"
         plt.savefig(image_file)
         logger.debug(f"saved cost map figure to {image_file}")
+        plt.close(f)
 
 def view_multiple_footstep_cost_maps(
     cost_maps: list[NDArray[Shape["4, H, W"], Float32]],
@@ -189,3 +190,4 @@ def view_multiple_footstep_cost_maps(
         image_file = image_dir / f"{timestamp}_multiple-cost-map.png"
         plt.savefig(image_file)
         logger.debug(f"saved cost map figure to {image_file}")
+        plt.close(f)
