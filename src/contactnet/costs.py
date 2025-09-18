@@ -122,10 +122,18 @@ class BallanceFootCosts(RunningCost):
 
     can help with metrics that inherently favor certian feet (front/back)
     """
-    def __init__(self, cost_class: RunningCost):
+    def __init__(self, cost_class: RunningCost, ballance_factor: float = 1.0):
+        """
+
+        Args:
+            cost_class (RunningCost): The cost class to ballance.
+            ballance_factor (float, optional): The factor by which to ballance the costs. Defaults to 1.0.
+                1.0 means full ballance, 0.5 means half ballance, 0.0 means no ballance.
+        """
         super().__init__(1.0)
         self.name = cost_class.name + " (bal)"
         self.cost_class = cost_class
+        self.ballance_factor = ballance_factor
     
     def update_running_cost(self, env: ManagerBasedEnv):
         self.cost_class.update_running_cost(env)
@@ -140,7 +148,7 @@ class BallanceFootCosts(RunningCost):
         overall_mean = torch.mean(foot_means)
         # adjust all to overall mean
         foot_adjustments = overall_mean - foot_means
-        adjusted_cost = cost_reshaped + foot_adjustments
+        adjusted_cost = cost_reshaped + foot_adjustments * self.ballance_factor
         # Transpose back and flatten
         return adjusted_cost.T.reshape(-1)
     

@@ -10,6 +10,7 @@ parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a ro
 #     "--num_envs", type=int, default=1, help="Number of environments to spawn."
 # )
 parser.add_argument("--debug", action="store_true", help="Enable debug views.")
+parser.add_argument("--interactive-plots", action="store_true", help="Enable interactive plots.")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -55,7 +56,7 @@ def signal_handler(sig, frame):
     global shutdown_requested
     if multiprocessing.current_process().name == "MainProcess":
         signal_name = signal.Signals(sig).name
-        logger.info(f"Signal {signal_name} received in main process, shutting down...")
+        logger.info(f"signal {signal_name} received in main process, shutting down...")
     shutdown_requested = True
 
 
@@ -275,7 +276,7 @@ class CostManager:
                 .reshape((4, fs.grid_size[0], fs.grid_size[1]))
             )
             titles.append(cost.name)
-        view_multiple_footstep_cost_maps(cost_maps, titles=titles)
+        view_multiple_footstep_cost_maps(cost_maps, titles=titles, save_figure=not args.interactive_plots)
 
 
 def get_step_cost_map(
@@ -336,12 +337,12 @@ def get_step_cost_map(
     cost_manager = CostManager(
         env,
         running_costs=[
-            cn_costs.BallanceFootCosts(
-                cn_costs.SimpleIntegrator(0.8, rewards.lin_vel_z_l2)  # type: ignore
-            ),
-            cn_costs.BallanceFootCosts(
-                cn_costs.SimpleIntegrator(0.03, rewards.ang_vel_xy_l2)  # type: ignore
-            ),
+            # cn_costs.BallanceFootCosts(
+            #     cn_costs.SimpleIntegrator(0.8, rewards.lin_vel_z_l2)  # type: ignore
+            # ),
+            # cn_costs.BallanceFootCosts(
+            #     cn_costs.SimpleIntegrator(0.03, rewards.ang_vel_xy_l2)  # type: ignore
+            # ),
             # cn_costs.SimpleIntegrator(4e-4, rewards.joint_torques_l2),  # type: ignore
             # cn_costs.SimpleIntegrator(5e-8, rewards.joint_acc_l2),  # type: ignore
             cn_costs.BallanceFootCosts(
@@ -412,7 +413,7 @@ def main():
         env_cfg.controllers = controllers
 
         for i in itertools.count():
-            logger.info(f"Iteration {i}")
+            logger.info(f"iteration {i}")
             if not (simulation_app.is_running() and not shutdown_requested):
                 break
             # grab initial state from robot 0
@@ -439,6 +440,7 @@ def main():
                     cost_map,
                     np.unravel_index(chosen_index, cost_map.shape),
                     title="Footstep Cost Map",
+                    save_figure=not args.interactive_plots,
                 )
 
     env_cfg.controllers = None

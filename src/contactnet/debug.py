@@ -2,7 +2,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 from nptyping import Float32, NDArray, Shape
 from mpl_toolkits.axes_grid1 import AxesGrid
+from src import PROJECT_ROOT
+from datetime import datetime
+import logging
 
+logger = logging.getLogger(__name__)
+
+# Ensure images directory exists
+image_dir = PROJECT_ROOT / "data" / "debug-images"
+image_dir.mkdir(exist_ok=True)
+
+# Delete all old images
+for file in image_dir.iterdir():
+    if file.is_file() and file.suffix in [".png", ".jpg", ".jpeg"]:
+        try:
+            file.unlink()
+        except Exception as e:
+            logger.warning(f"failed to delete old image file {file}: {e}")
+logger.info(f"cleared old images in {image_dir}")
 
 def view_footstep_cost_map(
     cost_map: NDArray[Shape["4, H, W"], Float32],
@@ -10,6 +27,7 @@ def view_footstep_cost_map(
     title: str | None = None,
     vmin: float | None = None,
     vmax: float | None = None,
+    save_figure: bool = False,
 ) -> None:
     """Visualize the footstep cost map.
 
@@ -32,11 +50,15 @@ def view_footstep_cost_map(
     axes = []
     titles = ["Front Left", "Front Right", "Rear Left", "Rear Right"]
 
+    f = plt.figure(figsize=(4, 4))
+
     im = None
     for i in range(4):
-        ax = plt.subplot(2, 2, i + 1)
+        ax = f.add_subplot(2, 2, i + 1)
         axes.append(ax)
         ax.set_title(titles[i])
+        ax.set_xticks([])
+        ax.set_yticks([])
         im = ax.imshow(
             # cost_map[i, ::-1, ::-1], cmap="hot", interpolation="nearest"
             cost_map[i, ::-1, ::-1], cmap="hot", interpolation="nearest", vmin=vmin, vmax=vmax
@@ -80,13 +102,20 @@ def view_footstep_cost_map(
     if title is not None:
         plt.suptitle(title)
 
-    plt.show(block=True)
+    if not save_figure:
+        plt.show(block=True)
+    else:
+        timestamp = datetime.now().isoformat(timespec="microseconds").replace(".", "-").replace(":", "-")
+        image_file = image_dir / f"{timestamp}_cost-map.png"
+        plt.savefig(image_file)
+        logger.debug(f"saved cost map figure to {image_file}")
 
 def view_multiple_footstep_cost_maps(
     cost_maps: list[NDArray[Shape["4, H, W"], Float32]],
     titles: list[str] | None = None,
     vmin: float | None = None,
     vmax: float | None = None,
+    save_figure: bool = False,
 ) -> None:
     """Visualize multiple footstep cost maps side by side.
 
@@ -153,5 +182,10 @@ def view_multiple_footstep_cost_maps(
             center_y = bottom + height
             f.text(center_x, center_y, f"{titles[i]} ({spread:.3f})", ha='center', va='bottom', fontsize=12)
 
-    # plt.tight_layout()
-    plt.show(block=True)
+    if not save_figure:
+        plt.show(block=True)
+    else:
+        timestamp = datetime.now().isoformat(timespec="microseconds").replace(".", "-").replace(":", "-")
+        image_file = image_dir / f"{timestamp}_multiple-cost-map.png"
+        plt.savefig(image_file)
+        logger.debug(f"saved cost map figure to {image_file}")

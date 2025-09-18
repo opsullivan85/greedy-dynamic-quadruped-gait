@@ -284,9 +284,9 @@ class VectorPool(Generic[T]):
                     pipe.send((Message.Manager.SHUTDOWN, None))
                     pipe.recv()  # Wait for acknowledgment
                     pipe.close()
-                    logger.debug(f"Cleaned up pipe {i}/{len(self.pipes)}")
+                    logger.debug(f"cleaned up pipe {i}/{len(self.pipes)}")
             except:
-                logger.info(f"Pipe {i} unresponsive during cleanup")
+                logger.info(f"pipe {i} unresponsive during cleanup")
                 pass  # Worker may already be dead
 
         # Terminate any remaining worker processes
@@ -296,9 +296,9 @@ class VectorPool(Generic[T]):
                 worker.join(timeout=0.1)
                 if worker.is_alive():
                     worker.kill()  # Force kill if terminate didn't work
-                    logger.info(f"Force killed worker {i}/{len(self.workers)}")
+                    logger.info(f"force killed worker {i}/{len(self.workers)}")
                 else:
-                    logger.debug(f"Terminated worker {i}/{len(self.workers)}")
+                    logger.debug(f"terminated worker {i}/{len(self.workers)}")
 
         self.workers.clear()
         self.pipes.clear()

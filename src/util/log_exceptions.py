@@ -30,7 +30,7 @@ class log_exceptions(ContextDecorator):
         if exc_type is not None:
             message = self.msg or "Exception occurred"
             self.logger.log(self.level, f"{message}: {exc_value}")
-            self.logger.debug("Traceback:\n%s", "".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+            self.logger.debug("traceback:\n%s", "".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
             return False  # Re-raise exception
         return True
 

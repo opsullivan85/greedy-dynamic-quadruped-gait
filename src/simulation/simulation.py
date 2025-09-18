@@ -94,7 +94,7 @@ def signal_handler(sig, frame):
     global shutdown_requested
     if multiprocessing.current_process().name == "MainProcess":
         signal_name = signal.Signals(sig).name
-        logger.info(f"Signal {signal_name} received in main process, shutting down...")
+        logger.info(f"signal {signal_name} received in main process, shutting down...")
     shutdown_requested = True
 
 
@@ -159,7 +159,7 @@ def main():
                 height_scanner = env.scene["FR_foot_scanner"]
 
                 reset_all_to(env, joint_pos_isaac, joint_vel_isaac, body_state_isaac)
-                logger.info("Reset all to robot 0 state.")
+                logger.info("reset all to robot 0 state.")
 
                 # step the enviornment a few times to make sure the feet are in contact
                 # for _ in range(50):

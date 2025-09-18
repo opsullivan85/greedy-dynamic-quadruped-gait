@@ -44,7 +44,7 @@ class _DataLogger:
 
         for key, value in data.items():
             if key not in self.data:
-                logger.warning(f"New key detected: {key}. Initializing storage.")
+                logger.warning(f"new key detected: {key}. Initializing storage.")
                 self.metadata["feature_keys"].append(key)
                 self.data[key] = []
 
@@ -107,7 +107,7 @@ class _DataLogger:
     def _save(self):
         self.step = 0
         if not self.data:
-            logger.warning("No data to save.")
+            logger.warning("no data to save.")
             return
 
         self._update_metadata()
@@ -119,12 +119,12 @@ class _DataLogger:
             if value_list:
                 compressed_data[key] = torch.stack(value_list)
             else:
-                logger.warning(f"No data recorded for key: {key}")
+                logger.warning(f"no data recorded for key: {key}")
         
         compressed_data["metadata"] = self.metadata
 
         torch.save(compressed_data, self.path)
-        logger.debug(f"Data saved to {self.path}")
+        logger.debug(f"data saved to {self.path}")
 
     def __del__(self):
         self.flush()
