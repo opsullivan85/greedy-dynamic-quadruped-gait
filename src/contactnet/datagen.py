@@ -39,6 +39,7 @@ simulation_app = app_launcher.app
 
 import logging
 import multiprocessing
+import subprocess
 
 import numpy as np
 import torch
@@ -373,11 +374,18 @@ def get_step_cost_map(
     return step_cost_map, done_states
 
 
-def get_control_vector() -> np.ndarray:
+def get_control_vector(max_yaw: float, max_control_input: float) -> np.ndarray:
+    """Generate a random control vector for the robot.
+
+    Args:
+        max_yaw (float): Maximum yaw rate.
+        max_control_input (float): Maximum control input.
+
+    Returns:
+        np.ndarray: Control vector for the robot.
+    """
     rng = np.random.default_rng()
     # calculate a random control input
-    max_yaw = 0.2
-    max_control_input = 0.2
 
     yaw_rate = rng.uniform(-max_yaw, max_yaw)
     # rotate a random control input value by a random rotation
@@ -428,19 +436,39 @@ def main():
         2
     ] += -0.075  # slightly above ground (default state is in the air)
 
-
-    training_data: list[tree.StepNode] = []
-
     data_dir = PROJECT_ROOT / "data"
     data_dir.mkdir(exist_ok=True)
     data_path = data_dir / f"{timestamp}.pkl"
+
+    max_yaw = 0.4  # rad/s
+    max_control_input = 0.2  # m/s
+
+    training_data: list[tree.StepNode] = []
+    metadata: dict[str, Any] = {
+        "git_hash": subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip(),
+        "args": vars(args),
+        "max_yaw": max_yaw,
+        "max_control_input": max_control_input,
+        "num_envs": num_envs,
+        "footstep_grid_size": fs.grid_size,
+        "footstep_grid_resolution": fs.grid_resolution,
+        "step_dt": env.step_dt,
+        "physics_dt": env.physics_dt,
+        "iterations_between_mpc": iterations_between_mpc,
+    }
+    data = {
+        "metadata": metadata,
+        "training_data": training_data,
+    }
 
     # simulate physics
     with controllers, torch.inference_mode():
         env_cfg.controllers = controllers
 
         for i in range(args.num_experiments):
-            control = get_control_vector()
+            if not (simulation_app.is_running() and not shutdown_requested):
+                break
+            control = get_control_vector(max_yaw, max_control_input)
             logger.info(f"control input: {control}")
 
             # setup new tree root
@@ -453,15 +481,15 @@ def main():
             )
 
             for j in range(args.batch_size):
+                if not (simulation_app.is_running() and not shutdown_requested):
+                    break
                 logger.info(
                     f"iteration {i+1}/{args.num_experiments}:{j+1}/{args.batch_size}"
                 )
-                if not (simulation_app.is_running() and not shutdown_requested):
-                    break
 
                 # switch control input every n iterations
                 if j % args.control_switch_interval == 0 and j > 0:
-                    control = get_control_vector()
+                    control = get_control_vector(max_yaw, max_control_input)
                     logger.info(f"new control input: {control}")
 
                 # get a random state from the tree
@@ -521,7 +549,7 @@ def main():
 
             # save data
             with open(data_path, "wb") as f:
-                pickle.dump(training_data, f)
+                pickle.dump(data, f)
             logger.info(f"saved {len(training_data)} data points to {data_path}")
 
     env_cfg.controllers = None
@@ -557,7 +585,7 @@ def dfs_debug():
         env.scene["robot"].data.root_state_w[0],
     )
 
-    control = np.array([0.1, 0.0, 0.0], dtype=np.float32)
+    control = np.array([0.2, 0.0, 0.0], dtype=np.float32)
 
     # simulate physics
     with controllers, torch.inference_mode():

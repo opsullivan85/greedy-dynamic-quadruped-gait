@@ -86,6 +86,8 @@ class TreeNode(anytree.NodeMixin):
     def mark_dead(self, height: int) -> None:
         """Mark the node's parent at a certain height, and all its descendants, as dead.
 
+        will specifically not mark the root as dead.
+
         Args:
             height (int): The height at which to mark the node as dead.
                 if the height is greater than the number of ancestors, the root will be marked dead.
@@ -99,6 +101,9 @@ class TreeNode(anytree.NodeMixin):
             self._mark_dead()
         # note that self.ancestor's 0th index is the root
         elif height <= len(self.ancestors):
+            # do not kill the root node
+            if height == len(self.ancestors):
+                height -= 1
             ancestor = self.ancestors[-height]
             ancestor._mark_dead()
         else:
