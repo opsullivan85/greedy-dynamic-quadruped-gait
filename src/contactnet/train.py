@@ -73,7 +73,7 @@ class QuadrupedDataset(Dataset):
         This combines joint positions, velocities, and body state into one
         feature vector for the neural network input.
         """
-        return np.concatenate([state.joint_pos, state.joint_vel, state.body_state])
+        return np.concatenate([state.joint_pos, state.joint_vel, state.body_state, state.control])
 
     def _metadatas_compatable(self) -> bool:
         """Check if all metadata entries are compatiable."""

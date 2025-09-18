@@ -8,14 +8,14 @@ import numpy as np
 from nptyping import Float32, NDArray, Shape, Bool
 
 
-# frozen allows for hashing
-@dataclass(frozen=True)
+@dataclass()
 class IsaacStateCPU:
     """Class for keeping track of an Isaac state."""
 
     joint_pos: np.ndarray
     joint_vel: np.ndarray
     body_state: np.ndarray
+    control: np.ndarray
 
     def to_torch(self, device: Any) -> "IsaacStateTorch":
         """Convert to torch tensors on the specified device."""
@@ -23,6 +23,7 @@ class IsaacStateCPU:
             joint_pos=torch.from_numpy(self.joint_pos).to(device),
             joint_vel=torch.from_numpy(self.joint_vel).to(device),
             body_state=torch.from_numpy(self.body_state).to(device),
+            control=torch.from_numpy(self.control).to(device),
         )
 
 
@@ -33,6 +34,7 @@ class IsaacStateTorch:
     joint_pos: torch.Tensor
     joint_vel: torch.Tensor
     body_state: torch.Tensor
+    control: torch.Tensor
 
     def to_numpy(self) -> IsaacStateCPU:
         """Convert to numpy arrays."""
@@ -40,6 +42,7 @@ class IsaacStateTorch:
             joint_pos=self.joint_pos.cpu().numpy(),
             joint_vel=self.joint_vel.cpu().numpy(),
             body_state=self.body_state.cpu().numpy(),
+            control=self.control.cpu().numpy(),
         )
 
 

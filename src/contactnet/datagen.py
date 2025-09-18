@@ -142,7 +142,7 @@ def _contact_sensor_dones(
     return dones
 
 
-def check_dones(env: ManagerBasedEnv) -> tuple[NDArray[Shape["*"], Bool], np.ndarray]:
+def check_dones(env: ManagerBasedEnv, control: torch.Tensor) -> tuple[NDArray[Shape["*"], Bool], np.ndarray]:
     """Check which footstep positions are done.
 
     Args:
@@ -170,6 +170,7 @@ def check_dones(env: ManagerBasedEnv) -> tuple[NDArray[Shape["*"], Bool], np.nda
             env.scene["robot"].data.joint_pos[i],
             env.scene["robot"].data.joint_vel[i],
             env.scene["robot"].data.root_state_w[i],
+            control[i],
         ).to_numpy()
     return dones, states
 
@@ -211,7 +212,7 @@ class CostManager:
         return self.costs + self.penalties
 
     def get_dones(
-        self, env: ManagerBasedEnv
+        self, env: ManagerBasedEnv, control: torch.Tensor
     ) -> tuple[NDArray[Shape["*"], Bool], NDArray[Shape["*"], Bool]]:
         """Get the done states for the environment.
 
@@ -222,7 +223,7 @@ class CostManager:
             NDArray[Shape["*"], Bool]: Array of booleans indicating which robots have finished.
             NDArray[Shape["*"], Bool]: Array of booleans indicating which robots are newly done.
         """
-        currently_done, currently_done_states = check_dones(env)
+        currently_done, currently_done_states = check_dones(env, control)
         newly_done = np.logical_and(currently_done, np.logical_not(self.dones))
         self.dones = np.logical_or(self.dones, currently_done)
         self.done_states[newly_done] = currently_done_states[newly_done]
@@ -357,14 +358,15 @@ def get_step_cost_map(
         obs, _ = env.step(joint_efforts)  # type: ignore
         obs: dict[str, dict[str, torch.Tensor]] = obs
 
-        dones, new_dones = cost_manager.get_dones(env)
+        dones, new_dones = cost_manager.get_dones(env, control_gpu)
         cost_manager.update(env, new_dones)
 
         elapsed_time_s += env.step_dt
 
         if np.all(dones) or elapsed_time_s >= max_time_s:
             # apply a cost penalty for not finishing
-            cost_manager.apply_penalty(~dones, float("inf"))
+            # be careful not to make this too high, otherwise the model could struggle learning
+            cost_manager.apply_penalty(~dones, 1)
             break
 
     if args.debug:
@@ -431,6 +433,7 @@ def main():
         joint_pos=env.scene["robot"].data.default_joint_pos[0],
         joint_vel=env.scene["robot"].data.default_joint_vel[0],
         body_state=env.scene["robot"].data.default_root_state[0],
+        control=torch.zeros((3,), dtype=torch.float32)
     ).to_numpy()
     default_state.body_state[
         2
@@ -470,13 +473,15 @@ def main():
                 break
             control = get_control_vector(max_yaw, max_control_input)
             logger.info(f"control input: {control}")
-
-            # setup new tree root
-            root = tree.TreeNode(
-                data=tree.StepNode(
+            
+            root_data=tree.StepNode(
                     state=default_state,
                     cost_map=None,
-                ),
+                )
+            root_data.state.control = control
+            # setup new tree root
+            root = tree.TreeNode(
+                data=root_data,
                 action=None,
             )
 
@@ -583,6 +588,7 @@ def dfs_debug():
         env.scene["robot"].data.joint_pos[0],
         env.scene["robot"].data.joint_vel[0],
         env.scene["robot"].data.root_state_w[0],
+        control=torch.zeros((3,), dtype=torch.float32)
     )
 
     control = np.array([0.2, 0.0, 0.0], dtype=np.float32)
