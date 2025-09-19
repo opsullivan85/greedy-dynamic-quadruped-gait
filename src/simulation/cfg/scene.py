@@ -44,10 +44,10 @@ class SceneCfg(InteractiveSceneCfg):
     foot_transforms = FrameTransformerCfg(
         prim_path="{ENV_REGEX_NS}/Robot/trunk",
         target_frames=[
-            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/fl_foot"),
-            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/fr_foot"),
-            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/rl_foot"),
-            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/rr_foot"),
+            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/FL_foot"),
+            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/FR_foot"),
+            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/RL_foot"),
+            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/RR_foot"),
         ],
         debug_vis=True,
     )

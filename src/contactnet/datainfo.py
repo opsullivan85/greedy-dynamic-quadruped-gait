@@ -4,7 +4,7 @@ from src import PROJECT_ROOT, logger
 def log_data_info():
     """Logs information about the data files in the data directory."""
     # load most recent data from
-    data_dir = PROJECT_ROOT / "data"
+    data_dir = PROJECT_ROOT / "data" / "datasets"
     data_files = sorted(data_dir.glob("*.pkl"))
     if not data_files:
         raise FileNotFoundError(f"No data files found in {data_dir}")
@@ -17,4 +17,4 @@ def log_data_info():
         metadata_msg = "\n\t\t- " + "\n\t\t- ".join(f"{k}: {v}" for k, v in data['metadata'].items())
         msg += f"\t- metadata: {metadata_msg}\n"
         logger.info(msg)
-        logger.info(data['training_data'][0].obs)
+        logger.info(data['training_data'][0])

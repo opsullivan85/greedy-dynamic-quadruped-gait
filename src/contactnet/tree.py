@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
+# TODO: the ammount of transfering small arrays from GPU to CPU is slowing things down a ton
 @dataclass()
 class Observation:
     """Stores data used in the ML model"""
@@ -30,10 +31,10 @@ class Observation:
         """control must be manually set after"""
         foot_positions_b = env.scene["foot_transforms"].data.target_pos_source[idx][:, :2].cpu().numpy()
 
-        body_state = env.scene["robot"].data.root_state_w[idx]
+        body_state = env.scene["robot"].data.root_state_w[idx].cpu().numpy()
         height_w = body_state[2]
-        vel_b = env.scene["robot"].data.root_link_lin_vel_b[idx]
-        omega_b = env.scene["robot"].data.root_link_ang_vel_b[idx]
+        vel_b = env.scene["robot"].data.root_link_lin_vel_b[idx].cpu().numpy()
+        omega_b = env.scene["robot"].data.root_link_ang_vel_b[idx].cpu().numpy()
         control = np.zeros((3,), dtype=np.float32)  # placeholder, must be set after
 
         return Observation(
