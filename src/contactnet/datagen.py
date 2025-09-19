@@ -366,7 +366,7 @@ def get_step_cost_map(
         if np.all(dones) or elapsed_time_s >= max_time_s:
             # apply a cost penalty for not finishing
             # be careful not to make this too high, otherwise the model could struggle learning
-            cost_manager.apply_penalty(~dones, 1)
+            cost_manager.apply_penalty(~dones, 2)
             break
 
     if args.debug:
@@ -498,8 +498,16 @@ def main():
                     logger.info(f"new control input: {control}")
 
                 # get a random state from the tree
-                leaf = root.get_living_leaf()
+                try:
+                    leaf = root.get_living_leaf()
+                except ValueError:
+                    logger.info("no living leaves left, ending batch early")
+                    break
                 state = leaf.data.state
+                if state is None:
+                    leaf.mark_dead(3)
+                    logger.info(f"leaf {leaf} is dead (no state)")
+                    continue
                 cost_map, terminal_states = get_step_cost_map(
                     env,
                     control=control,
