@@ -3,6 +3,7 @@ import signal
 
 from isaaclab.app import AppLauncher
 from src import PROJECT_ROOT, timestamp
+import src.simulation.cfg.footstep_scanner_constants as fs
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a robot.")
@@ -54,7 +55,6 @@ from src.sim2real import SimInterface
 from src.simulation.util import controls_to_joint_efforts, reset_all_to
 from src.util import VectorPool
 from src.simulation.cfg.quadrupedenv import QuadrupedEnvCfg, get_quadruped_env_cfg
-import src.simulation.cfg.footstep_scanner as fs
 from src.contactnet.debug import (
     view_footstep_cost_map,
     view_multiple_footstep_cost_maps,
@@ -439,7 +439,7 @@ def main():
         2
     ] += -0.075  # slightly above ground (default state is in the air)
 
-    data_dir = PROJECT_ROOT / "data"
+    data_dir = PROJECT_ROOT / "data" / "datasets"
     data_dir.mkdir(exist_ok=True)
     data_path = data_dir / f"{timestamp}.pkl"
 

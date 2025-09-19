@@ -11,6 +11,7 @@ from typing import List, Tuple
 from datetime import datetime
 from src.contactnet.tree import IsaacStateCPU, StepNode
 from src import PROJECT_ROOT
+from src.contactnet.util import get_dataset_paths
 
 logger = logging.getLogger(__name__)
 
@@ -422,10 +423,7 @@ def main():
     logger.info(f"using device: {device}")
 
     # Load dataset
-    dataset = QuadrupedDataset([
-        PROJECT_ROOT / "data" / "2025-09-18T11-38-21.pkl",
-        PROJECT_ROOT / "data" / "2025-09-18T11-45-07.pkl",
-    ])
+    dataset = QuadrupedDataset(get_dataset_paths())
 
     # Split dataset (80% train, 20% validation)
     train_size = int(0.8 * len(dataset))

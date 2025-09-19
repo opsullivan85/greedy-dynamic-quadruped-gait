@@ -8,7 +8,7 @@ from src.util import VectorPool
 from abc import abstractmethod, ABC
 from src.contactnet.debug import view_footstep_cost_map
 from src.util.math import quat_to_euler_torch
-import src.simulation.cfg.footstep_scanner as fs
+import src.simulation.cfg.footstep_scanner_constants as fs
 
 
 class TerminalCost(ABC):

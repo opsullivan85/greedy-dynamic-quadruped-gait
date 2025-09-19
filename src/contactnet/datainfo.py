@@ -17,3 +17,4 @@ def log_data_info():
         metadata_msg = "\n\t\t- " + "\n\t\t- ".join(f"{k}: {v}" for k, v in data['metadata'].items())
         msg += f"\t- metadata: {metadata_msg}\n"
         logger.info(msg)
+        logger.info(data['training_data'][0])
