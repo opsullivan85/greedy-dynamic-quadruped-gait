@@ -6,7 +6,43 @@ import torch
 
 import numpy as np
 from nptyping import Float32, NDArray, Shape, Bool
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from isaaclab.envs import ManagerBasedEnv
 
+
+@dataclass()
+class Observation:
+    """Stores data used in the ML model"""
+    foot_positions_b: NDArray[Shape["4, 2"], Float32]
+    """XY positions of the feet relative to the body frame."""
+    height_w: float
+    """Height of the body in the world frame."""
+    vel_b: NDArray[Shape["3"], Float32]
+    """Velocity of the body in the body frame."""
+    omega_b: NDArray[Shape["3"], Float32]
+    """Angular velocity of the body in the body frame."""
+    control: NDArray[Shape["3"], Float32]
+    """Last control input."""
+
+    @staticmethod
+    def from_idx(env: "ManagerBasedEnv", idx: int) -> "Observation":
+        """control must be manually set after"""
+        foot_positions_b = env.scene["foot_transforms"].data.target_pos_source[idx][:, :2].cpu().numpy()
+
+        body_state = env.scene["robot"].data.root_state_w[idx]
+        height_w = body_state[2]
+        vel_b = env.scene["robot"].data.root_link_lin_vel_b[idx]
+        omega_b = env.scene["robot"].data.root_link_ang_vel_b[idx]
+        control = np.zeros((3,), dtype=np.float32)  # placeholder, must be set after
+
+        return Observation(
+            foot_positions_b=foot_positions_b,
+            height_w=height_w,
+            vel_b=vel_b,
+            omega_b=omega_b,
+            control=control
+        )
 
 @dataclass()
 class IsaacStateCPU:
@@ -15,7 +51,7 @@ class IsaacStateCPU:
     joint_pos: np.ndarray
     joint_vel: np.ndarray
     body_state: np.ndarray
-    control: np.ndarray
+    obs: Observation
 
     def to_torch(self, device: Any) -> "IsaacStateTorch":
         """Convert to torch tensors on the specified device."""
@@ -23,7 +59,7 @@ class IsaacStateCPU:
             joint_pos=torch.from_numpy(self.joint_pos).to(device),
             joint_vel=torch.from_numpy(self.joint_vel).to(device),
             body_state=torch.from_numpy(self.body_state).to(device),
-            control=torch.from_numpy(self.control).to(device),
+            obs=self.obs,
         )
 
 
@@ -34,7 +70,7 @@ class IsaacStateTorch:
     joint_pos: torch.Tensor
     joint_vel: torch.Tensor
     body_state: torch.Tensor
-    control: torch.Tensor
+    obs: Observation
 
     def to_numpy(self) -> IsaacStateCPU:
         """Convert to numpy arrays."""
@@ -42,8 +78,27 @@ class IsaacStateTorch:
             joint_pos=self.joint_pos.cpu().numpy(),
             joint_vel=self.joint_vel.cpu().numpy(),
             body_state=self.body_state.cpu().numpy(),
-            control=self.control.cpu().numpy(),
+            obs=self.obs,
         )
+    
+    @staticmethod
+    def from_idx(env: "ManagerBasedEnv", idx: int) -> "IsaacStateTorch":
+        """Create an IsaacStateTorch from an environment and an index.
+        obs.control must be manually set after
+        """
+        joint_pos = env.scene["robot"].data.joint_pos[idx]
+        joint_vel = env.scene["robot"].data.joint_vel[idx]
+        body_state = env.scene["robot"].data.root_state_w[idx]
+
+        return IsaacStateTorch(
+            joint_pos=joint_pos,
+            joint_vel=joint_vel,
+            body_state=body_state,
+            obs=Observation.from_idx(env, idx)
+        )
+
+
+
 
 
 @dataclass()
@@ -115,10 +170,9 @@ class TreeNode(anytree.NodeMixin):
             root._mark_dead()
 
     def get_explored_nodes(self) -> list["TreeNode"]:
-        """Get all non-dead leaf nodes in the subtree rooted at this node."""
+        """Get all non-dead leaf nodes in the subtree rooted at this node.
+        also excludes this node (the root)"""
         nodes: list["TreeNode"] = [n for n in self.descendants if not n.dead and not n.is_leaf]
-        if not self.dead and not self.is_leaf:
-            nodes.append(self)  # include self if valid
         return nodes
     
     def get_living_leaf(self) -> "TreeNode":

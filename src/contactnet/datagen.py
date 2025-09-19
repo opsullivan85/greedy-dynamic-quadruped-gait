@@ -166,12 +166,9 @@ def check_dones(env: ManagerBasedEnv, control: torch.Tensor) -> tuple[NDArray[Sh
     indices = np.argwhere(dones)
     for index in indices:
         i = index[0]
-        states[i] = tree.IsaacStateTorch(
-            env.scene["robot"].data.joint_pos[i],
-            env.scene["robot"].data.joint_vel[i],
-            env.scene["robot"].data.root_state_w[i],
-            control[i],
-        ).to_numpy()
+        state = tree.IsaacStateTorch.from_idx(env, i).to_numpy()
+        state.obs.control = control[i].cpu().numpy()
+        states[i] = state
     return dones, states
 
     # # TODO: implement
@@ -433,7 +430,8 @@ def main():
         joint_pos=env.scene["robot"].data.default_joint_pos[0],
         joint_vel=env.scene["robot"].data.default_joint_vel[0],
         body_state=env.scene["robot"].data.default_root_state[0],
-        control=torch.zeros((3,), dtype=torch.float32)
+        # this is a bad observation, but we ignore the root when saving the data so it should be fine
+        obs=tree.Observation.from_idx(env, 0),
     ).to_numpy()
     default_state.body_state[
         2
@@ -478,7 +476,7 @@ def main():
                     state=default_state,
                     cost_map=None,
                 )
-            root_data.state.control = control
+            root_data.state.obs.control = control
             # setup new tree root
             root = tree.TreeNode(
                 data=root_data,
@@ -592,12 +590,7 @@ def dfs_debug():
         tuple[tree.IsaacStateCPU, NDArray[Shape["4, N, M"], Float32]]
     ] = []
 
-    start_state: tree.IsaacStateTorch = tree.IsaacStateTorch(
-        env.scene["robot"].data.joint_pos[0],
-        env.scene["robot"].data.joint_vel[0],
-        env.scene["robot"].data.root_state_w[0],
-        control=torch.zeros((3,), dtype=torch.float32)
-    )
+    start_state: tree.IsaacStateTorch = tree.IsaacStateTorch.from_idx(env, 0)
 
     control = np.array([0.2, 0.0, 0.0], dtype=np.float32)
 
