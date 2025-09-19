@@ -21,6 +21,7 @@ def log_data_info():
     # load most recent data from
     data_dir = PROJECT_ROOT / "data" / "datasets"
     data_files = sorted(data_dir.glob("*.pkl"))
+    total_points = 0
     if not data_files:
         raise FileNotFoundError(f"No data files found in {data_dir}")
     for data_file in data_files:
@@ -29,10 +30,12 @@ def log_data_info():
 
         msg = f"Found data file: {data_file}\n"
         msg += f"\t- training_data: {len(data['training_data'])} points\n"
+        total_points += len(data['training_data'])
         metadata_msg = "\n\t\t- " + "\n\t\t- ".join(f"{k}: {v}" for k, v in data['metadata'].items())
         msg += f"\t- metadata: {metadata_msg}\n"
         logger.info(msg)
-        logger.info(data['training_data'][167])
+        
+    logger.info(f"Total training data points across {len(data_files)} files: {total_points}")
 
 def generate_all_costmaps():
     """Generates costmaps for all data files in the data directory."""

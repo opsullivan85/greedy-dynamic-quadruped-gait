@@ -160,17 +160,16 @@ class FootModel(nn.Module):
         self.network = nn.Sequential(
             nn.Linear(input_dim, 128),
             nn.ReLU(),
-            # nn.Dropout(dropout_rate),
             nn.Linear(128, 128),
             nn.ReLU(),
-            # nn.Dropout(dropout_rate),
             nn.Linear(128, 128),
             nn.ReLU(),
-            # nn.Dropout(dropout_rate),
-            nn.Linear(128, 128),
+            # Reshape to 4D for conv layer (assuming 8x8 spatial dimensions)
+            nn.Unflatten(1, (2, 8, 8)),  # Reshape 128 -> (2, 8, 8)
+            nn.Conv2d(2, 4, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
-            # nn.Dropout(dropout_rate),
-            nn.Linear(128, output_dim),
+            nn.Flatten(),  # Flatten back to 1D for final linear layer
+            nn.Linear(4 * 8 * 8, output_dim),  # Adjust input size accordingly
         )
 
         # Initialize weights using Xavier/Glorot initialization
@@ -204,7 +203,7 @@ class QuadrupedModel(nn.Module):
             [FootModel(input_dim, output_dim_per_foot) for _ in range(4)]
         )
 
-        logger.info(f"created quadruped model with {len(self.foot_models)} foot models")
+        logger.info(f"created ContactNet model")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
