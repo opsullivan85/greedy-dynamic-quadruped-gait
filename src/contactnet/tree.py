@@ -27,23 +27,32 @@ class Observation:
     """Last control input."""
 
     @staticmethod
-    def from_idx(env: "ManagerBasedEnv", idx: int) -> "Observation":
-        """control must be manually set after"""
-        foot_positions_b = env.scene["foot_transforms"].data.target_pos_source[idx][:, :2].cpu().numpy()
+    def from_idxs(env: "ManagerBasedEnv", idxs: np.ndarray) -> list["Observation"]:
+        """Create a list of Observations from an environment and a list of indices.
 
-        body_state = env.scene["robot"].data.root_state_w[idx].cpu().numpy()
-        height_w = body_state[2]
-        vel_b = env.scene["robot"].data.root_link_lin_vel_b[idx].cpu().numpy()
-        omega_b = env.scene["robot"].data.root_link_ang_vel_b[idx].cpu().numpy()
-        control = np.zeros((3,), dtype=np.float32)  # placeholder, must be set after
+        Args:
+            env (ManagerBasedEnv): The environment to extract observations from.
+            idxs (np.ndarray): The indices of the environments to extract observations from.
 
-        return Observation(
-            foot_positions_b=foot_positions_b,
-            height_w=height_w,
-            vel_b=vel_b,
-            omega_b=omega_b,
-            control=control
-        )
+        Returns:
+            list[Observation]: A list of Observation objects.
+        """
+        foot_positions_b = env.scene["foot_transforms"].data.target_pos_source[idxs].cpu().numpy()[:, :, :2]
+
+        body_states = env.scene["robot"].data.root_com_pose_w[idxs].cpu().numpy()
+        heights_w = body_states[:, 2]
+        vel_bs = env.scene["robot"].data.root_link_lin_vel_b[idxs].cpu().numpy()
+        omega_bs = env.scene["robot"].data.root_link_ang_vel_b[idxs].cpu().numpy()
+
+        return [
+            Observation(
+                foot_positions_b=foot_positions_b[i],
+                height_w=heights_w[i],
+                vel_b=vel_bs[i],
+                omega_b=omega_bs[i],
+                control=np.zeros((3,), dtype=np.float32)  # placeholder, must be set after
+            ) for i in range(len(idxs))
+        ]
 
 @dataclass()
 class IsaacStateCPU:
@@ -62,6 +71,14 @@ class IsaacStateCPU:
             body_state=torch.from_numpy(self.body_state).to(device),
             obs=self.obs,
         )
+    
+    @staticmethod
+    def from_idxs(env: "ManagerBasedEnv", idxs: np.ndarray) -> list["IsaacStateCPU"]:
+        """Create a list of IsaacStateCPU from an environment and a list of indices.
+        obs.control must be manually set after
+        """
+        torch_states = IsaacStateTorch.from_idxs(env, idxs)
+        return [s.to_numpy() for s in torch_states]
 
 
 @dataclass()
@@ -83,20 +100,23 @@ class IsaacStateTorch:
         )
     
     @staticmethod
-    def from_idx(env: "ManagerBasedEnv", idx: int) -> "IsaacStateTorch":
-        """Create an IsaacStateTorch from an environment and an index.
+    def from_idxs(env: "ManagerBasedEnv", idxs: np.ndarray) -> list["IsaacStateTorch"]:
+        """Create a list of IsaacStateTorch from an environment and a list of indices.
         obs.control must be manually set after
         """
-        joint_pos = env.scene["robot"].data.joint_pos[idx]
-        joint_vel = env.scene["robot"].data.joint_vel[idx]
-        body_state = env.scene["robot"].data.root_state_w[idx]
+        joint_pos = env.scene["robot"].data.joint_pos[idxs]
+        joint_vel = env.scene["robot"].data.joint_vel[idxs]
+        body_state = env.scene["robot"].data.root_state_w[idxs]
+        observations = Observation.from_idxs(env, idxs)
 
-        return IsaacStateTorch(
-            joint_pos=joint_pos,
-            joint_vel=joint_vel,
-            body_state=body_state,
-            obs=Observation.from_idx(env, idx)
-        )
+        return [
+            IsaacStateTorch(
+                joint_pos=joint_pos[i],
+                joint_vel=joint_vel[i],
+                body_state=body_state[i],
+                obs=observations[i]
+            ) for i in range(len(idxs))
+        ]
 
 
 

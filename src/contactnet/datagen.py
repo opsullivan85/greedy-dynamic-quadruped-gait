@@ -142,7 +142,7 @@ def _contact_sensor_dones(
     return dones
 
 
-def check_dones(env: ManagerBasedEnv, control: torch.Tensor) -> tuple[NDArray[Shape["*"], Bool], np.ndarray]:
+def check_dones(env: ManagerBasedEnv, control: np.ndarray) -> tuple[NDArray[Shape["*"], Bool], np.ndarray]:
     """Check which footstep positions are done.
 
     Args:
@@ -163,12 +163,11 @@ def check_dones(env: ManagerBasedEnv, control: torch.Tensor) -> tuple[NDArray[Sh
         dones = np.logical_and(controller_dones, contact_sensor_dones)
 
     states = np.full((env.num_envs,), None, dtype=object)
-    indices = np.argwhere(dones)
-    for index in indices:
-        i = index[0]
-        state = tree.IsaacStateTorch.from_idx(env, i).to_numpy()
-        state.obs.control = control[i].cpu().numpy()
-        states[i] = state
+    done_idxs = np.argwhere(dones).flatten()
+    if len(done_idxs) > 0:
+        states[done_idxs] = tree.IsaacStateCPU.from_idxs(env, done_idxs)
+        for state, control in zip(states[done_idxs], control[done_idxs]):
+            state.obs.control = control
     return dones, states
 
     # # TODO: implement
@@ -209,7 +208,7 @@ class CostManager:
         return self.costs + self.penalties
 
     def get_dones(
-        self, env: ManagerBasedEnv, control: torch.Tensor
+        self, env: ManagerBasedEnv, control: np.ndarray
     ) -> tuple[NDArray[Shape["*"], Bool], NDArray[Shape["*"], Bool]]:
         """Get the done states for the environment.
 
@@ -355,7 +354,7 @@ def get_step_cost_map(
         obs, _ = env.step(joint_efforts)  # type: ignore
         obs: dict[str, dict[str, torch.Tensor]] = obs
 
-        dones, new_dones = cost_manager.get_dones(env, control_gpu)
+        dones, new_dones = cost_manager.get_dones(env, control_vect)
         cost_manager.update(env, new_dones)
 
         elapsed_time_s += env.step_dt
@@ -431,7 +430,7 @@ def main():
         joint_vel=env.scene["robot"].data.default_joint_vel[0],
         body_state=env.scene["robot"].data.default_root_state[0],
         # this is a bad observation, but we ignore the root when saving the data so it should be fine
-        obs=tree.Observation.from_idx(env, 0),
+        obs=tree.Observation.from_idxs(env, np.asarray([0]))[0],
     ).to_numpy()
     default_state.body_state[
         2
@@ -590,7 +589,7 @@ def dfs_debug():
         tuple[tree.IsaacStateCPU, NDArray[Shape["4, N, M"], Float32]]
     ] = []
 
-    start_state: tree.IsaacStateTorch = tree.IsaacStateTorch.from_idx(env, 0)
+    start_state: tree.IsaacStateTorch = tree.IsaacStateTorch.from_idxs(env, np.asarray([0]))[0]
 
     control = np.array([0.2, 0.0, 0.0], dtype=np.float32)
 
