@@ -57,7 +57,7 @@ class QuadrupedDataset(Dataset):
         logger.info(f"loaded {len(self.training_data)} valid training samples")
 
         # Calculate input dimensions from the first sample
-        sample_state = self._flatten_state(self.training_data[0].state)
+        sample_state = self.flatten_state(self.training_data[0].state)
         self.input_dim = len(sample_state)
         # we know the metadatas match for this entry
         self.output_dim = (
@@ -67,7 +67,8 @@ class QuadrupedDataset(Dataset):
         logger.info(f"input dimension: {self.input_dim}")
         logger.info(f"output dimension: {self.output_dim}")
 
-    def _flatten_state(self, state: IsaacStateCPU) -> np.ndarray:
+    @staticmethod
+    def flatten_state(state: IsaacStateCPU) -> np.ndarray:
         """
         Flatten the robot state into a single vector.
 
@@ -81,7 +82,18 @@ class QuadrupedDataset(Dataset):
             state.obs.omega_b,
             state.obs.control,
         ])
-        # return np.concatenate([state.joint_pos, state.joint_vel, state.body_state, state.control])
+
+    @staticmethod
+    def normalize_cost_map(cost_map: np.ndarray) -> np.ndarray:
+        """Normalize the cost map to [0, 1] range.
+        where values only retain relative ordering information.
+
+        as in \\cite{bratta2024contactnet}, except we are using 1-their values (lower is better)
+        """
+        flat = cost_map.reshape(cost_map.shape[0], -1)
+        ordering = np.argsort(np.argsort(flat, axis=1), axis=1).reshape(*cost_map.shape)
+        # ordering = np.argsort(cost_map.reshape(cost_map.shape[0], -1)).reshape(*cost_map.shape)
+        return ordering / (cost_map.shape[1] * cost_map.shape[2] - 1)
 
     def _metadatas_compatable(self) -> bool:
         """Check if all metadata entries are compatiable."""
@@ -127,13 +139,12 @@ class QuadrupedDataset(Dataset):
         node = self.training_data[idx]
 
         # Flatten the state for input
-        state_flat = self._flatten_state(node.state)
+        state_flat = self.flatten_state(node.state)
 
-        # remove inf values from cost map
-        node.cost_map = np.where(np.isinf(node.cost_map), 2, node.cost_map)  # type: ignore
-
+        # normalize cost map
+        norm_cost_map = self.normalize_cost_map(node.cost_map)  # type: ignore
         # Flatten cost map from (4, 5, 5) to (4, 25) for 4 separate foot models
-        cost_map_flat = node.cost_map.reshape(4, -1)  # Shape: (4, 25) # type: ignore
+        cost_map_flat = norm_cost_map.reshape(4, -1)  # Shape: (4, 25) # type: ignore
 
         return torch.FloatTensor(state_flat), torch.FloatTensor(cost_map_flat)
 
@@ -147,20 +158,19 @@ class FootModel(nn.Module):
         super(FootModel, self).__init__()
 
         self.network = nn.Sequential(
-            # First dense layer
-            nn.Linear(input_dim, 64),
+            nn.Linear(input_dim, 128),
             nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            # Second dense layer
-            nn.Linear(64, 64),
+            # nn.Dropout(dropout_rate),
+            nn.Linear(128, 128),
             nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            # Third dense layer
-            nn.Linear(64, 64),
+            # nn.Dropout(dropout_rate),
+            nn.Linear(128, 128),
             nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            # Output layer
-            nn.Linear(64, output_dim),
+            # nn.Dropout(dropout_rate),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            # nn.Dropout(dropout_rate),
+            nn.Linear(128, output_dim),
         )
 
         # Initialize weights using Xavier/Glorot initialization

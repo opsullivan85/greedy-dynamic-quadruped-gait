@@ -27,7 +27,8 @@ def compare_model_output(
         num_samples (int): Number of samples to visualize.
     """
     model.eval()
-    indices = np.random.choice(len(dataset), num_samples, replace=False)
+    # indices = np.random.choice(len(dataset), num_samples, replace=False)
+    indices = np.linspace(0, len(dataset)-1, num_samples, dtype=int)[:5]
 
     for idx in indices:
         state, expected_costmap = dataset[idx]

@@ -362,7 +362,7 @@ def get_step_cost_map(
         if np.all(dones) or elapsed_time_s >= max_time_s:
             # apply a cost penalty for not finishing
             # be careful not to make this too high, otherwise the model could struggle learning
-            cost_manager.apply_penalty(~dones, 3)
+            cost_manager.apply_penalty(~dones, float("inf"))
             break
 
     if args.debug:
