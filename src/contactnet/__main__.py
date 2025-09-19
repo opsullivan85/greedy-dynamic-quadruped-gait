@@ -11,7 +11,7 @@ if __name__ == "__main__":
     parser.add_argument("--datagen", action="store_true", help="Generate data")
     parser.add_argument("--train", action="store_true", help="Train model")
     parser.add_argument("--evaluate", action="store_true", help="Evaluate model")
-    parser.add_argument("--data-finder", action="store_true", help="Find data files")
+    parser.add_argument("--data-info", action="store_true", help="Find data files")
     parser.add_argument("--dfs-debug", action="store_true", help="Run DFS debug")
     args = parser.parse_known_args()
     used_args, unknown_args = args
@@ -33,9 +33,9 @@ if __name__ == "__main__":
             from src.contactnet import datagen
             datagen.dfs_debug()
 
-        elif used_args.data_finder:
+        elif used_args.data_info:
             from src.contactnet import datainfo
-            datainfo.log_data_info()
+            datainfo.main()
         
         else:
             raise ValueError("No valid arguments provided. Use --help for more information.")

@@ -362,7 +362,7 @@ def get_step_cost_map(
         if np.all(dones) or elapsed_time_s >= max_time_s:
             # apply a cost penalty for not finishing
             # be careful not to make this too high, otherwise the model could struggle learning
-            cost_manager.apply_penalty(~dones, 2)
+            cost_manager.apply_penalty(~dones, 3)
             break
 
     if args.debug:
@@ -502,15 +502,8 @@ def main():
                     break
                 state = leaf.data.state
                 if state is None:
-                    # I'm not sure why this happens, but sometimes a leaf has no state
-                    # The only reasons I can think of are if the branching factor is too high
-                    #   and we are adding failed states as children
-                    # or if the failure cost isn't high enough
-                    # neither of these are the case, so I'm at a loss
-                    #
-                    # for now just mark the leaf as dead and continue
                     leaf.mark_dead(0)
-                    logger.info(f"leaf {leaf} is dead (no state)")
+                    logger.info(f"leaf {leaf} is dead (no state)\n\tif this happens frequently, increase the failure penalty")
                     continue
                 cost_map, terminal_states = get_step_cost_map(
                     env,

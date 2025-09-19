@@ -30,7 +30,7 @@ def get_dataset_paths() -> list[Path]:
     if args.datasets:
         return [Path(d) for d in args.datasets]
     else:
-        dataset_dir = PROJECT_ROOT / "data"
+        dataset_dir = PROJECT_ROOT / "data" / "datasets"
         if not dataset_dir.exists():
             raise FileNotFoundError(f"Dataset directory {dataset_dir} does not exist.")
         dataset_paths = [d for d in dataset_dir.iterdir() if not d.is_dir() and d.suffix == ".pkl"]

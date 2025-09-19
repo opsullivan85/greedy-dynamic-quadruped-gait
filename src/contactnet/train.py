@@ -76,7 +76,7 @@ class QuadrupedDataset(Dataset):
         """
         return np.concatenate([
             state.obs.foot_positions_b.flatten(),
-            state.obs.height_w,
+            [state.obs.height_w],
             state.obs.vel_b,
             state.obs.omega_b,
             state.obs.control,
