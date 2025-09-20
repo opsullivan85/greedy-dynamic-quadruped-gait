@@ -6,6 +6,7 @@ from src.contactnet.train import QuadrupedDataset, QuadrupedModel
 from src.contactnet.debug import view_footstep_cost_map
 import logging
 import argparse
+import time
 
 from src.contactnet.util import get_checkpoint_path, get_dataset_paths
 
@@ -17,6 +18,11 @@ parser.add_argument(
     type=int,
     default=5,
     help="Number of samples to visualize",
+)
+parser.add_argument(
+    "--benchmark",
+    action="store_true",
+    help="Run benchmark for model evaluation speed",
 )
 args, unused_args = parser.parse_known_args()
 
@@ -68,6 +74,33 @@ def compare_model_output(
         )
 
 
+def benchmark_model_evaluation(
+    model: nn.Module,
+    device: torch.device,
+    input_dim: int,
+    num_runs: int = 1000,
+):
+    """
+    Benchmark the model's evaluation speed by running it on random input data.
+
+    Args:
+        model (nn.Module): The trained ContactNet model.
+        device (torch.device): The device to run the model on.
+        input_dim (int): The input dimension of the model.
+        num_runs (int): Number of evaluation runs to perform.
+    """
+    model.eval()
+    with torch.no_grad():
+        start_time = time.time()
+        for _ in range(num_runs):
+            random_input = torch.randn(1, input_dim).to(device)
+            _ = model(random_input)
+        end_time = time.time()
+        total_time = end_time - start_time
+        evaluations_per_second = num_runs / total_time
+        print(f"Evaluations per second: {evaluations_per_second:.2f}")
+
+
 def main():
 
     # Load dataset
@@ -83,6 +116,9 @@ def main():
     model.to(device)
 
     compare_model_output(model, dataset, device=device, num_samples=args.samples)
+
+    if args.benchmark:
+        benchmark_model_evaluation(model, device, dataset.input_dim)
 
 
 if __name__ == "__main__":
