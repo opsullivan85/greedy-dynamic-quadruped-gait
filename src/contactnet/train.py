@@ -90,10 +90,19 @@ class QuadrupedDataset(Dataset):
 
         as in \\cite{bratta2024contactnet}, except we are using 1-their values (lower is better)
         """
-        flat = cost_map.reshape(cost_map.shape[0], -1)
-        ordering = np.argsort(np.argsort(flat, axis=1), axis=1).reshape(*cost_map.shape)
-        # ordering = np.argsort(cost_map.reshape(cost_map.shape[0], -1)).reshape(*cost_map.shape)
-        return ordering / (cost_map.shape[1] * cost_map.shape[2] - 1)
+        # normalize each major index to [0, 1] range, excluding inf values
+        finite_mask = np.isfinite(cost_map)
+        finite_map = cost_map[finite_mask]
+        minimums = np.min(finite_map)
+        maximums = np.max(finite_map)
+        # normalize cost_map. Ignore divide by zero since something
+        # needs to have gone horribly wrong if max == min
+        norm_map = (cost_map - minimums) / (maximums - minimums)
+        # set inf values to 1 (worst possible cost)
+        norm_map[~finite_mask] = 1.0
+        return norm_map
+
+
 
     def _metadatas_compatable(self) -> bool:
         """Check if all metadata entries are compatiable."""
@@ -158,18 +167,16 @@ class FootModel(nn.Module):
         super(FootModel, self).__init__()
 
         self.network = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 64),
             nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(64, 64),
             nn.ReLU(),
             # Reshape to 4D for conv layer (assuming 8x8 spatial dimensions)
-            nn.Unflatten(1, (2, 8, 8)),  # Reshape 128 -> (2, 8, 8)
-            nn.Conv2d(2, 4, kernel_size=3, stride=1, padding=1),
+            nn.Unflatten(1, (1, 8, 8)),  # Reshape 64 -> (1, 8, 8)
+            nn.Conv2d(1, 2, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.Flatten(),  # Flatten back to 1D for final linear layer
-            nn.Linear(4 * 8 * 8, output_dim),  # Adjust input size accordingly
+            nn.Linear(2 * 8 * 8, output_dim),  # Adjust input size accordingly
         )
 
         # Initialize weights using Xavier/Glorot initialization
@@ -478,7 +485,7 @@ def main():
     )
 
     # Train the model
-    trainer.train(num_epochs=100)
+    trainer.train(num_epochs=200)
 
 
 if __name__ == "__main__":
