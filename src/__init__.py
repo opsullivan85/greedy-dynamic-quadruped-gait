@@ -63,7 +63,7 @@ ch = logging.StreamHandler(sys.stdout)
 ch.setLevel(logging.INFO)
 ch.setFormatter(
     ProjectRelativeFormatter(
-        "%(asctime)s | %(name)s | %(levelname)s | [%(relpath)s:%(lineno)d] %(message)s",
+        "%(asctime)s | %(relpath)s:%(lineno)d | %(levelname)s |  %(message)s",
         "%Y-%m-%d %H:%M:%S",
     )
 )

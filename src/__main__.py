@@ -7,4 +7,6 @@ def main():
     print("Hello, World!")
 
 if __name__ == "__main__":
-    main()
+    from src.util import log_exceptions
+    with log_exceptions(logger):
+        main()

@@ -129,3 +129,8 @@ def main():
         generate_all_costmaps()
     if args.placement_maps:
         generate_footstep_placement_maps()
+
+if __name__ == "__main__":
+    from src.util import log_exceptions
+    with log_exceptions(logger):
+        main()
