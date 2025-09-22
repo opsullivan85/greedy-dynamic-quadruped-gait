@@ -1,10 +1,10 @@
-import logging
 from abc import ABC, abstractmethod
 
 import numpy as np
 from nptyping import Float32, NDArray, Shape, Bool
 
-logger = logging.getLogger(__name__)
+from src import get_logger
+logger = get_logger()
 
 
 class Sim2RealInterface(ABC):

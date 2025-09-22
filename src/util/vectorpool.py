@@ -1,5 +1,4 @@
 import inspect
-import logging
 import traceback
 from multiprocessing import Pipe, Process, cpu_count
 from multiprocessing.connection import Connection
@@ -10,7 +9,8 @@ from nptyping import NDArray, Shape, Bool, Number
 
 import enum
 
-logger = logging.getLogger(__name__)
+from src import get_logger
+logger = get_logger()
 
 
 class Message:

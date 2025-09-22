@@ -2,6 +2,7 @@ import logging
 import sys
 from pathlib import Path
 from datetime import datetime
+import inspect
 
 # Define project root (adjust if needed)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -89,6 +90,19 @@ logger.info(f"log file: {log_file}")
 launch_str = " ".join(sys.orig_argv)
 logger.debug(f"running '{launch_str}'")
 
+
+def get_logger():
+    """Get a logger with name relative to the src directory."""
+    frame = inspect.currentframe()
+    if frame is None or frame.f_back is None:
+        return logging.getLogger("src.unknown")
+    frame = frame.f_back
+    filename = frame.f_code.co_filename
+    rel_path = Path(filename).relative_to(PROJECT_ROOT / "src")
+    module_name = str(rel_path).replace("/", ".").replace("\\", ".").replace(".py", "")
+    return logging.getLogger("src." + module_name)
+
+
 # Delete old log files
 log_files = sorted(log_dir.glob("*.log"), key=lambda f: f.stat().st_mtime)
 max_logs = 10
@@ -101,6 +115,20 @@ while len(log_files) >= max_logs:
         logger.debug(f"failed to delete {oldest}: {e}")
     del oldest
 
-del ch, fh, max_logs, launch_str, log_files, log_dir, ProjectRelativeFormatter, AlignedFormatter, datetime, Path, sys, logging
+del (
+    ch,
+    fh,
+    max_logs,
+    launch_str,
+    log_files,
+    log_dir,
+    ProjectRelativeFormatter,
+    AlignedFormatter,
+    datetime,
+    # Path,
+    sys,
+    # logging,
+    # inspect,
+)
 
 logger.debug("initialized")

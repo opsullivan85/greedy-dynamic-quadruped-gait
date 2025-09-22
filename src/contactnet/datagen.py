@@ -38,7 +38,6 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import logging
 import multiprocessing
 import subprocess
 
@@ -62,8 +61,9 @@ from src.contactnet.debug import (
 from src.contactnet import tree
 from nptyping import Float32, NDArray, Shape, Bool
 import pickle
+from src import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 # Global flag for graceful shutdown
 shutdown_requested = False

@@ -1,6 +1,6 @@
 from src.util import log_exceptions
-import logging
-logger = logging.getLogger(__file__)
+from src import get_logger
+logger = get_logger()
 
 
 if __name__ == "__main__":
@@ -13,6 +13,7 @@ if __name__ == "__main__":
     parser.add_argument("--evaluate", action="store_true", help="Evaluate model")
     parser.add_argument("--data-info", action="store_true", help="Find data files")
     parser.add_argument("--dfs-debug", action="store_true", help="Run DFS debug")
+    parser.add_argument("--manual-control", action="store_true", help="Run robot with controller and network")
     args = parser.parse_known_args()
     used_args, unknown_args = args
 
@@ -36,6 +37,10 @@ if __name__ == "__main__":
         elif used_args.data_info:
             from src.contactnet import datainfo
             datainfo.main()
+        
+        elif used_args.manual_control:
+            from src.contactnet import manualcontrol
+            manualcontrol.main()
         
         else:
             raise ValueError("No valid arguments provided. Use --help for more information.")

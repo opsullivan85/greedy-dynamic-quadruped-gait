@@ -4,10 +4,10 @@ from nptyping import Float32, NDArray, Shape
 from mpl_toolkits.axes_grid1 import AxesGrid
 from src import PROJECT_ROOT
 from datetime import datetime
-import logging
 import src.simulation.cfg.footstep_scanner_constants as fs
 
-logger = logging.getLogger(__name__)
+from src import get_logger
+logger = get_logger()
 
 # Ensure images directory exists
 image_dir = PROJECT_ROOT / "data" / "debug-images"

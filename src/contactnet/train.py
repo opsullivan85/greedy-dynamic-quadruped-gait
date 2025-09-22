@@ -5,15 +5,15 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import pickle
 import numpy as np
-import logging
 from pathlib import Path
 from typing import List, Tuple
 from datetime import datetime
 from src.contactnet.tree import IsaacStateCPU, StepNode
 from src import PROJECT_ROOT
 from src.contactnet.util import get_dataset_paths
+from src import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class QuadrupedDataset(Dataset):

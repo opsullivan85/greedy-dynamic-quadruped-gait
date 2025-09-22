@@ -1,16 +1,15 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import logging
 from src.contactnet.train import QuadrupedDataset, QuadrupedModel
 from src.contactnet.debug import view_footstep_cost_map
-import logging
 import argparse
 import time
 
 from src.contactnet.util import get_checkpoint_path, get_dataset_paths
+from src import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 parser = argparse.ArgumentParser(description="Data information")
 parser.add_argument(

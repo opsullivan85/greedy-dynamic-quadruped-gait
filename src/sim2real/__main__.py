@@ -1,8 +1,8 @@
-import logging
 
 from src.util import log_exceptions
 
-logger = logging.getLogger(__file__)
+from src import get_logger
+logger = get_logger()
 
 
 @log_exceptions(logger)

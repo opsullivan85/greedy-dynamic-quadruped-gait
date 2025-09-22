@@ -1,4 +1,3 @@
-import logging
 
 from isaaclab.envs import ManagerBasedRLEnvCfg  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
@@ -15,7 +14,8 @@ from src.simulation.cfg.manager_components import (
 from src.simulation.cfg.scene import SceneCfg
 import numpy as np
 
-logger = logging.getLogger(__name__)
+from src import get_logger
+logger = get_logger()
 
 
 @configclass

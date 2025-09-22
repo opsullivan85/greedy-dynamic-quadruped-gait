@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 from typing import Any, TypeAlias
 import numpy as np
@@ -7,7 +6,8 @@ from src import timestamp, PROJECT_ROOT
 import atexit
 from time import time
 
-logger = logging.getLogger(__name__)
+from src import get_logger
+logger = get_logger()
 
 DataType: TypeAlias = dict[str, torch.Tensor]
 """Data format to be logged.

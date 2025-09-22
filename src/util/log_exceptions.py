@@ -1,4 +1,3 @@
-import logging
 import traceback
 from contextlib import ContextDecorator
 from functools import wraps
