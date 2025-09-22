@@ -1,9 +1,6 @@
 import argparse
-import signal
 
 from isaaclab.app import AppLauncher
-from src import PROJECT_ROOT, timestamp
-import src.simulation.cfg.footstep_scanner_constants as fs
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a robot.")
@@ -38,8 +35,11 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import signal
 import multiprocessing
 import subprocess
+from src import PROJECT_ROOT, timestamp
+import src.simulation.cfg.footstep_scanner_constants as fs
 
 import numpy as np
 import torch
@@ -359,7 +359,7 @@ def get_step_cost_map(
 
         elapsed_time_s += env.step_dt
 
-        if np.all(dones) or elapsed_time_s >= max_time_s:
+        if np.all(a=dones) or elapsed_time_s >= max_time_s:
             # apply a cost penalty for not finishing
             # be careful not to make this too high, otherwise the model could struggle learning
             cost_manager.apply_penalty(~dones, float("inf"))
