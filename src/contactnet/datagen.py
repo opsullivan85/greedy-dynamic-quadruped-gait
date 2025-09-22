@@ -589,9 +589,18 @@ def dfs_debug():
         tuple[tree.IsaacStateCPU, NDArray[Shape["4, N, M"], Float32]]
     ] = []
 
-    start_state: tree.IsaacStateTorch = tree.IsaacStateTorch.from_idxs(env, np.asarray([0]))[0]
+    start_state: tree.IsaacStateTorch = tree.IsaacStateTorch(
+        joint_pos=env.scene["robot"].data.default_joint_pos[0],
+        joint_vel=env.scene["robot"].data.default_joint_vel[0],
+        body_state=env.scene["robot"].data.default_root_state[0],
+        # this is a bad observation, but we ignore the root when saving the data so it should be fine
+        obs=tree.Observation.from_idxs(env, np.asarray([0]))[0],
+    )
+    start_state.body_state[
+        2
+    ] += -0.075  # slightly above ground (default state is in the air)
 
-    control = np.array([0.2, 0.0, 0.0], dtype=np.float32)
+    control = np.array([0.0, 0.1, 0.0], dtype=np.float32)
 
     # simulate physics
     with controllers, torch.inference_mode():
@@ -611,7 +620,7 @@ def dfs_debug():
 
             # pick new start state from one of the n lowest cost terminal states
             flat_cost_map = cost_map.flatten()
-            pick_from_best_n = 5
+            pick_from_best_n = 1
             lowest_indices = np.argpartition(flat_cost_map, pick_from_best_n)[
                 :pick_from_best_n
             ]

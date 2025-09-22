@@ -81,7 +81,7 @@ def compare_model_output(
         )
         view_footstep_cost_map(
             expected_costmap, 
-            # title=f"Expected Cost Map Sample {idx}", 
+            title=f"Expected Cost Map Sample {idx}", 
             save_figure=True
         )
 

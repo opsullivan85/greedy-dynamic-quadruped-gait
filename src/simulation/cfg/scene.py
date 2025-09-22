@@ -32,7 +32,7 @@ class SceneCfg(InteractiveSceneCfg):
     contact_forces = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
         update_period=0.0,
-        debug_vis=True,
+        debug_vis=False,
         track_air_time=True,
     )
 
@@ -49,6 +49,6 @@ class SceneCfg(InteractiveSceneCfg):
             FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/RL_foot"),
             FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/RR_foot"),
         ],
-        debug_vis=True,
+        debug_vis=False,
     )
     """FL_foot FR_foot RL_foot RR_foot"""
