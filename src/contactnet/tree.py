@@ -6,16 +6,62 @@ import torch
 
 import numpy as np
 from nptyping import Float32, NDArray, Shape, Bool
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from isaaclab.envs import ManagerBasedEnv
 
 
-# frozen allows for hashing
-@dataclass(frozen=True)
+# TODO: the ammount of transfering small arrays from GPU to CPU is slowing things down a ton
+@dataclass()
+class Observation:
+    """Stores data used in the ML model"""
+    foot_positions_b: NDArray[Shape["4, 2"], Float32]
+    """XY positions of the feet relative to the body frame."""
+    height_w: float
+    """Height of the body in the world frame."""
+    vel_b: NDArray[Shape["3"], Float32]
+    """Velocity of the body in the body frame."""
+    omega_b: NDArray[Shape["3"], Float32]
+    """Angular velocity of the body in the body frame."""
+    control: NDArray[Shape["3"], Float32]
+    """Last control input."""
+
+    @staticmethod
+    def from_idxs(env: "ManagerBasedEnv", idxs: np.ndarray) -> list["Observation"]:
+        """Create a list of Observations from an environment and a list of indices.
+
+        Args:
+            env (ManagerBasedEnv): The environment to extract observations from.
+            idxs (np.ndarray): The indices of the environments to extract observations from.
+
+        Returns:
+            list[Observation]: A list of Observation objects.
+        """
+        foot_positions_b = env.scene["foot_transforms"].data.target_pos_source[idxs].cpu().numpy()[:, :, :2]
+
+        body_states = env.scene["robot"].data.root_com_pose_w[idxs].cpu().numpy()
+        heights_w = body_states[:, 2]
+        vel_bs = env.scene["robot"].data.root_link_lin_vel_b[idxs].cpu().numpy()
+        omega_bs = env.scene["robot"].data.root_link_ang_vel_b[idxs].cpu().numpy()
+
+        return [
+            Observation(
+                foot_positions_b=foot_positions_b[i],
+                height_w=heights_w[i],
+                vel_b=vel_bs[i],
+                omega_b=omega_bs[i],
+                control=np.zeros((3,), dtype=np.float32)  # placeholder, must be set after
+            ) for i in range(len(idxs))
+        ]
+
+@dataclass()
 class IsaacStateCPU:
     """Class for keeping track of an Isaac state."""
 
     joint_pos: np.ndarray
     joint_vel: np.ndarray
     body_state: np.ndarray
+    obs: Observation
 
     def to_torch(self, device: Any) -> "IsaacStateTorch":
         """Convert to torch tensors on the specified device."""
@@ -23,7 +69,16 @@ class IsaacStateCPU:
             joint_pos=torch.from_numpy(self.joint_pos).to(device),
             joint_vel=torch.from_numpy(self.joint_vel).to(device),
             body_state=torch.from_numpy(self.body_state).to(device),
+            obs=self.obs,
         )
+    
+    @staticmethod
+    def from_idxs(env: "ManagerBasedEnv", idxs: np.ndarray) -> list["IsaacStateCPU"]:
+        """Create a list of IsaacStateCPU from an environment and a list of indices.
+        obs.control must be manually set after
+        """
+        torch_states = IsaacStateTorch.from_idxs(env, idxs)
+        return [s.to_numpy() for s in torch_states]
 
 
 @dataclass()
@@ -33,6 +88,7 @@ class IsaacStateTorch:
     joint_pos: torch.Tensor
     joint_vel: torch.Tensor
     body_state: torch.Tensor
+    obs: Observation
 
     def to_numpy(self) -> IsaacStateCPU:
         """Convert to numpy arrays."""
@@ -40,7 +96,30 @@ class IsaacStateTorch:
             joint_pos=self.joint_pos.cpu().numpy(),
             joint_vel=self.joint_vel.cpu().numpy(),
             body_state=self.body_state.cpu().numpy(),
+            obs=self.obs,
         )
+    
+    @staticmethod
+    def from_idxs(env: "ManagerBasedEnv", idxs: np.ndarray) -> list["IsaacStateTorch"]:
+        """Create a list of IsaacStateTorch from an environment and a list of indices.
+        obs.control must be manually set after
+        """
+        joint_pos = env.scene["robot"].data.joint_pos[idxs]
+        joint_vel = env.scene["robot"].data.joint_vel[idxs]
+        body_state = env.scene["robot"].data.root_state_w[idxs]
+        observations = Observation.from_idxs(env, idxs)
+
+        return [
+            IsaacStateTorch(
+                joint_pos=joint_pos[i],
+                joint_vel=joint_vel[i],
+                body_state=body_state[i],
+                obs=observations[i]
+            ) for i in range(len(idxs))
+        ]
+
+
+
 
 
 @dataclass()
@@ -112,10 +191,9 @@ class TreeNode(anytree.NodeMixin):
             root._mark_dead()
 
     def get_explored_nodes(self) -> list["TreeNode"]:
-        """Get all non-dead leaf nodes in the subtree rooted at this node."""
+        """Get all non-dead leaf nodes in the subtree rooted at this node.
+        also excludes this node (the root)"""
         nodes: list["TreeNode"] = [n for n in self.descendants if not n.dead and not n.is_leaf]
-        if not self.dead and not self.is_leaf:
-            nodes.append(self)  # include self if valid
         return nodes
     
     def get_living_leaf(self) -> "TreeNode":

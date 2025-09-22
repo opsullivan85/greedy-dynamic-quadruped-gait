@@ -19,7 +19,6 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import logging
 import multiprocessing
 
 import numpy as np
@@ -33,7 +32,8 @@ from src.simulation.util import controls_to_joint_efforts, reset_all_to
 from src.util.data_logging import data_logger
 from src.simulation.cfg.quadrupedenv import QuadrupedEnvCfg, get_quadruped_env_cfg
 
-logger = logging.getLogger(__name__)
+from src import get_logger
+logger = get_logger()
 
 
 def walk_in_place(count: int, control_interface: VectorPool):

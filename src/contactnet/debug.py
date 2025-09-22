@@ -4,9 +4,10 @@ from nptyping import Float32, NDArray, Shape
 from mpl_toolkits.axes_grid1 import AxesGrid
 from src import PROJECT_ROOT
 from datetime import datetime
-import logging
+import src.simulation.cfg.footstep_scanner_constants as fs
 
-logger = logging.getLogger(__name__)
+from src import get_logger
+logger = get_logger()
 
 # Ensure images directory exists
 image_dir = PROJECT_ROOT / "data" / "debug-images"
@@ -28,6 +29,7 @@ def view_footstep_cost_map(
     vmin: float | None = None,
     vmax: float | None = None,
     save_figure: bool = False,
+    show_indices: bool = False,
 ) -> None:
     """Visualize the footstep cost map.
 
@@ -57,30 +59,50 @@ def view_footstep_cost_map(
         ax = f.add_subplot(2, 2, i + 1)
         axes.append(ax)
         ax.set_title(titles[i])
-        ax.set_xticks([])
-        ax.set_yticks([])
+        # only show ticks on the left and bottom
+        if i in [2, 3]:
+            x_ticks = [x for x in range(fs.grid_size[0])]
+            x_labels = [fs.grid_resolution * (x - fs.grid_size[0] // 2) for x in range(fs.grid_size[0])]
+            x_labels = [f"{xl:.2f}" for xl in x_labels]
+            x_ticks = x_ticks[::2]
+            x_labels = x_labels[::2]
+            ax.set_xticks(x_ticks, x_labels)
+        else:
+            ax.set_xticks([])
+        if i in [0, 2]:
+            y_ticks = [y for y in range(fs.grid_size[1])]
+            y_labels = [fs.grid_resolution * (y - fs.grid_size[1] // 2) for y in range(fs.grid_size[1])]
+            y_labels = [f"{yl:.2f}" for yl in y_labels]
+            y_ticks = y_ticks[::2]
+            y_labels = y_labels[::2]
+            ax.set_yticks(y_ticks, y_labels)
+        else:
+            ax.set_yticks([])
         im = ax.imshow(
-            # cost_map[i, ::-1, ::-1], cmap="hot", interpolation="nearest"
             cost_map[i, ::-1, ::-1], cmap="hot", interpolation="nearest", vmin=vmin, vmax=vmax
         )
-        # Overlay the flat index value for each pixel
-        H, W = cost_map.shape[1:]
-        for row in range(H):
-            for col in range(W):
-                # Compute the original flat index for this display position
-                # Since we rotated 180 degrees, we need to flip the row and col
-                original_row = H - 1 - row
-                original_col = W - 1 - col
-                flat_idx = np.ravel_multi_index((i, original_row, original_col), cost_map.shape)
-                ax.text(
-                    col,
-                    row,
-                    str(flat_idx),
-                    color="white",
-                    fontsize=8,
-                    ha="center",
-                    va="center",
-                )
+        if show_indices:
+            # Overlay the flat index value for each pixel
+            H, W = cost_map.shape[1:]
+            for row in range(H):
+                for col in range(W):
+                    # Compute the original flat index for this display position
+                    # Since we rotated 180 degrees, we need to flip the row and col
+                    original_row = H - 1 - row
+                    original_col = W - 1 - col
+                    flat_idx = np.ravel_multi_index((i, original_row, original_col), cost_map.shape)
+                    ax.text(
+                        col,
+                        row,
+                        str(flat_idx),
+                        color="white",
+                        fontsize=8,
+                        ha="center",
+                        va="center",
+                    )
+
+    # Adjust subplot spacing to reduce vertical gaps
+    plt.subplots_adjust(hspace=-0.1, left=0.2, bottom=0.1)
 
     # Add a single colorbar for all subplots, using the last imshow result (im is guaranteed to be set)
     fig = plt.gcf()
@@ -89,6 +111,12 @@ def view_footstep_cost_map(
 
     cbar = fig.colorbar(im, ax=axes)
     cbar.set_label("Action Cost (Lower is better)")
+
+    # Add centered x-axis label
+    fig.text(0.5, 0.02, "X Nominal Stance Offset (m)", ha='center', va='bottom', fontsize=12)
+    
+    # Add centered y-axis label
+    fig.text(0.05, 0.5, "Y Nominal Stance Offset (m)", ha='center', va='center', rotation=90, fontsize=12)
 
     # Plot the selected point on the correct subplot (adjust for display reordering and rotation)
     if selected_idx is not None:

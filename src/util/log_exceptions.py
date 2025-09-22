@@ -1,7 +1,7 @@
-import logging
 import traceback
 from contextlib import ContextDecorator
 from functools import wraps
+import logging
 
 class log_exceptions(ContextDecorator):
     """

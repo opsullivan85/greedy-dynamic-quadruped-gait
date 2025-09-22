@@ -1,8 +1,8 @@
-import logging
 
 from src.sim2real.abstractinterface import Sim2RealInterface
 
-logger = logging.getLogger(__name__)
+from src import get_logger
+logger = get_logger()
 
 
 class RealInterface(Sim2RealInterface): ...

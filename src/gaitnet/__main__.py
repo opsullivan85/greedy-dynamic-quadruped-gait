@@ -1,10 +1,12 @@
 from src.util import log_exceptions
-import logging
-logger = logging.getLogger(__file__)
+from src import get_logger
+logger = get_logger()
 
 @log_exceptions(logger)
 def main():
     print("Hello, GaitNet!")
 
 if __name__ == "__main__":
-    main()
+    from src.util import log_exceptions
+    with log_exceptions(logger):
+        main()

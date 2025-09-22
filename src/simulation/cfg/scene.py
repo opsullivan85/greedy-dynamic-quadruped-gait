@@ -1,7 +1,7 @@
 import isaaclab.sim as sim_utils  # type: ignore
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg  # type: ignore
 from isaaclab.scene import InteractiveSceneCfg  # type: ignore
-from isaaclab.sensors import ContactSensorCfg, RayCasterCfg  # type: ignore
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, FrameTransformerCfg  # type: ignore
 from isaaclab.utils import configclass  # type: ignore
 
 from src.simulation.cfg.footstep_scanner import (
@@ -32,7 +32,7 @@ class SceneCfg(InteractiveSceneCfg):
     contact_forces = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
         update_period=0.0,
-        debug_vis=True,
+        debug_vis=False,
         track_air_time=True,
     )
 
@@ -40,3 +40,15 @@ class SceneCfg(InteractiveSceneCfg):
         prim_path="/World/Light",
         spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75)),
     )
+
+    foot_transforms = FrameTransformerCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/trunk",
+        target_frames=[
+            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/FL_foot"),
+            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/FR_foot"),
+            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/RL_foot"),
+            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/RR_foot"),
+        ],
+        debug_vis=False,
+    )
+    """FL_foot FR_foot RL_foot RR_foot"""

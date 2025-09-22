@@ -1,4 +1,3 @@
-import logging
 
 import numpy as np
 from nptyping import Float32, NDArray, Shape, Bool
@@ -6,7 +5,8 @@ from nptyping import Float32, NDArray, Shape, Bool
 from src.control import RobotRunnerMin, RobotType, mpc
 from src.sim2real.abstractinterface import Sim2RealInterface
 
-logger = logging.getLogger(__name__)
+from src import get_logger
+logger = get_logger()
 
 
 class SimInterface(Sim2RealInterface):

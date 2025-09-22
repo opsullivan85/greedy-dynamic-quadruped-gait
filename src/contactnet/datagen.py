@@ -1,8 +1,6 @@
 import argparse
-import signal
 
 from isaaclab.app import AppLauncher
-from src import PROJECT_ROOT, timestamp
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on adding sensors on a robot.")
@@ -37,9 +35,11 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import logging
+import signal
 import multiprocessing
 import subprocess
+from src import PROJECT_ROOT, timestamp
+import src.simulation.cfg.footstep_scanner_constants as fs
 
 import numpy as np
 import torch
@@ -54,7 +54,6 @@ from src.sim2real import SimInterface
 from src.simulation.util import controls_to_joint_efforts, reset_all_to
 from src.util import VectorPool
 from src.simulation.cfg.quadrupedenv import QuadrupedEnvCfg, get_quadruped_env_cfg
-import src.simulation.cfg.footstep_scanner as fs
 from src.contactnet.debug import (
     view_footstep_cost_map,
     view_multiple_footstep_cost_maps,
@@ -62,8 +61,9 @@ from src.contactnet.debug import (
 from src.contactnet import tree
 from nptyping import Float32, NDArray, Shape, Bool
 import pickle
+from src import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -142,7 +142,7 @@ def _contact_sensor_dones(
     return dones
 
 
-def check_dones(env: ManagerBasedEnv) -> tuple[NDArray[Shape["*"], Bool], np.ndarray]:
+def check_dones(env: ManagerBasedEnv, control: np.ndarray) -> tuple[NDArray[Shape["*"], Bool], np.ndarray]:
     """Check which footstep positions are done.
 
     Args:
@@ -163,14 +163,11 @@ def check_dones(env: ManagerBasedEnv) -> tuple[NDArray[Shape["*"], Bool], np.nda
         dones = np.logical_and(controller_dones, contact_sensor_dones)
 
     states = np.full((env.num_envs,), None, dtype=object)
-    indices = np.argwhere(dones)
-    for index in indices:
-        i = index[0]
-        states[i] = tree.IsaacStateTorch(
-            env.scene["robot"].data.joint_pos[i],
-            env.scene["robot"].data.joint_vel[i],
-            env.scene["robot"].data.root_state_w[i],
-        ).to_numpy()
+    done_idxs = np.argwhere(dones).flatten()
+    if len(done_idxs) > 0:
+        states[done_idxs] = tree.IsaacStateCPU.from_idxs(env, done_idxs)
+        for state, control in zip(states[done_idxs], control[done_idxs]):
+            state.obs.control = control
     return dones, states
 
     # # TODO: implement
@@ -211,7 +208,7 @@ class CostManager:
         return self.costs + self.penalties
 
     def get_dones(
-        self, env: ManagerBasedEnv
+        self, env: ManagerBasedEnv, control: np.ndarray
     ) -> tuple[NDArray[Shape["*"], Bool], NDArray[Shape["*"], Bool]]:
         """Get the done states for the environment.
 
@@ -222,7 +219,7 @@ class CostManager:
             NDArray[Shape["*"], Bool]: Array of booleans indicating which robots have finished.
             NDArray[Shape["*"], Bool]: Array of booleans indicating which robots are newly done.
         """
-        currently_done, currently_done_states = check_dones(env)
+        currently_done, currently_done_states = check_dones(env, control)
         newly_done = np.logical_and(currently_done, np.logical_not(self.dones))
         self.dones = np.logical_or(self.dones, currently_done)
         self.done_states[newly_done] = currently_done_states[newly_done]
@@ -357,13 +354,14 @@ def get_step_cost_map(
         obs, _ = env.step(joint_efforts)  # type: ignore
         obs: dict[str, dict[str, torch.Tensor]] = obs
 
-        dones, new_dones = cost_manager.get_dones(env)
+        dones, new_dones = cost_manager.get_dones(env, control_vect)
         cost_manager.update(env, new_dones)
 
         elapsed_time_s += env.step_dt
 
-        if np.all(dones) or elapsed_time_s >= max_time_s:
+        if np.all(a=dones) or elapsed_time_s >= max_time_s:
             # apply a cost penalty for not finishing
+            # be careful not to make this too high, otherwise the model could struggle learning
             cost_manager.apply_penalty(~dones, float("inf"))
             break
 
@@ -431,12 +429,14 @@ def main():
         joint_pos=env.scene["robot"].data.default_joint_pos[0],
         joint_vel=env.scene["robot"].data.default_joint_vel[0],
         body_state=env.scene["robot"].data.default_root_state[0],
+        # this is a bad observation, but we ignore the root when saving the data so it should be fine
+        obs=tree.Observation.from_idxs(env, np.asarray([0]))[0],
     ).to_numpy()
     default_state.body_state[
         2
     ] += -0.075  # slightly above ground (default state is in the air)
 
-    data_dir = PROJECT_ROOT / "data"
+    data_dir = PROJECT_ROOT / "data" / "datasets"
     data_dir.mkdir(exist_ok=True)
     data_path = data_dir / f"{timestamp}.pkl"
 
@@ -470,13 +470,15 @@ def main():
                 break
             control = get_control_vector(max_yaw, max_control_input)
             logger.info(f"control input: {control}")
-
-            # setup new tree root
-            root = tree.TreeNode(
-                data=tree.StepNode(
+            
+            root_data=tree.StepNode(
                     state=default_state,
                     cost_map=None,
-                ),
+                )
+            root_data.state.obs.control = control
+            # setup new tree root
+            root = tree.TreeNode(
+                data=root_data,
                 action=None,
             )
 
@@ -493,8 +495,16 @@ def main():
                     logger.info(f"new control input: {control}")
 
                 # get a random state from the tree
-                leaf = root.get_living_leaf()
+                try:
+                    leaf = root.get_living_leaf()
+                except ValueError:
+                    logger.info("no living leaves left, ending batch early")
+                    break
                 state = leaf.data.state
+                if state is None:
+                    leaf.mark_dead(0)
+                    logger.info(f"leaf {leaf} is dead (no state)\n\tif this happens frequently, increase the failure penalty")
+                    continue
                 cost_map, terminal_states = get_step_cost_map(
                     env,
                     control=control,
@@ -580,12 +590,17 @@ def dfs_debug():
     ] = []
 
     start_state: tree.IsaacStateTorch = tree.IsaacStateTorch(
-        env.scene["robot"].data.joint_pos[0],
-        env.scene["robot"].data.joint_vel[0],
-        env.scene["robot"].data.root_state_w[0],
+        joint_pos=env.scene["robot"].data.default_joint_pos[0],
+        joint_vel=env.scene["robot"].data.default_joint_vel[0],
+        body_state=env.scene["robot"].data.default_root_state[0],
+        # this is a bad observation, but we ignore the root when saving the data so it should be fine
+        obs=tree.Observation.from_idxs(env, np.asarray([0]))[0],
     )
+    start_state.body_state[
+        2
+    ] += -0.075  # slightly above ground (default state is in the air)
 
-    control = np.array([0.2, 0.0, 0.0], dtype=np.float32)
+    control = np.array([0.0, 0.1, 0.0], dtype=np.float32)
 
     # simulate physics
     with controllers, torch.inference_mode():
@@ -605,7 +620,7 @@ def dfs_debug():
 
             # pick new start state from one of the n lowest cost terminal states
             flat_cost_map = cost_map.flatten()
-            pick_from_best_n = 5
+            pick_from_best_n = 1
             lowest_indices = np.argpartition(flat_cost_map, pick_from_best_n)[
                 :pick_from_best_n
             ]

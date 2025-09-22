@@ -1,7 +1,7 @@
 from src.util import log_exceptions
-import logging
 
-logger = logging.getLogger(__file__)
+from src import get_logger
+logger = get_logger()
 from src.simulation.simulation import main
 
 if __name__ == "__main__":
