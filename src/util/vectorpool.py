@@ -213,6 +213,10 @@ class VectorPool(Generic[T]):
     ) -> NDArray[Shape["*, ..."], Any]:
         """Calls a function on all of the underlying objects
 
+        Note: kwargs get masked, so it should have the same number of rows
+        as the number of instances in the pool, but the values of masked rows
+        do not matter.
+
         Args:
             function (Callable): function to call (should be a handle to a function from T)
             mask (None | NDArray[Shape["*"], Bool]): mask to apply to the function inputs

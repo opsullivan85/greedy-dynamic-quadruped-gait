@@ -13,6 +13,7 @@ from src.util import VectorPool
 from src.simulation.util import controls_to_joint_efforts
 import numpy as np
 
+NO_STEP = -1  # special value for no step
 
 class FSCActionTerm(ActionTerm):
     """Footstep Controller (FSC) Action Term"""
@@ -45,8 +46,13 @@ class FSCActionTerm(ActionTerm):
 
     @property
     def action_dim(self) -> int:
-        """Dimension of the action term."""
-        return 3  # 3D velocity command: vx, vy, wz
+        """Dimension of the action term.
+        
+        [:, 0] = leg index (0-3) or no step (-1)
+        [:, 1:3] = x, y location relative to hip
+        [:, 3] = duration of the step in seconds
+        """
+        return 4
 
     @property
     def raw_actions(self) -> torch.Tensor:
@@ -56,19 +62,20 @@ class FSCActionTerm(ActionTerm):
     def processed_actions(self) -> torch.Tensor:
         return self._processed_actions
     
-    def footsetep_kwargs(self, processed_actions: torch.Tensor) -> dict[str, Any]:
+    @staticmethod
+    def footstep_kwargs(processed_actions: np.ndarray) -> dict[str, np.ndarray]:
         """Generate the kwargs for the footstep initiation call.
 
         Args:
-            processed_actions: The processed actions.
+            processed_actions: The processed actions (on cpu).
 
         Returns:
-            A dictionary of keyword arguments for the footstep initiation call.
+            The kwargs for the footstep initiation call.
         """
         return {
-            "leg": int(processed_actions[0]),
-            "location_hip": processed_actions[1:3].cpu().numpy(),
-            "duration": float(processed_actions[3]),
+            "leg": processed_actions[:, 0].astype(np.int32),
+            "location_hip": processed_actions[:, 1:3],
+            "duration": processed_actions[:, 3],
         }
 
     def process_actions(self, actions: torch.Tensor):
@@ -83,12 +90,17 @@ class FSCActionTerm(ActionTerm):
         # initiate the footstep if specified by the actions
         self._raw_actions = actions
         self._processed_actions = self._raw_actions  # no processing needed
-        
+        processed_actions_cpu = self.processed_actions.cpu().numpy()
 
+        # mask out invalid steps
+        mask = processed_actions_cpu[:, 0] != NO_STEP
+        footstep_parameters = self.footstep_kwargs(processed_actions_cpu)
+
+        # initiate the footsteps
         self.robot_controllers.call(
             function=sim2real.Sim2RealInterface.initiate_footstep,
-            mask=None,
-            **self.footsetep_kwargs(self._processed_actions[0]),
+            mask=mask,
+            **footstep_parameters,
         )
 
     def apply_actions(self):
