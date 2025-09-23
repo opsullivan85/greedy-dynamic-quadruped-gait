@@ -1,4 +1,4 @@
-"""Action for running low level control with an MPC"""
+"""Action for running footstep controller"""
 
 from dataclasses import MISSING
 from typing import Any, Sequence
@@ -14,10 +14,10 @@ from src.simulation.util import controls_to_joint_efforts
 import numpy as np
 
 
-class MPCActionTerm(ActionTerm):
-    """MPC Action Term"""
+class FSCActionTerm(ActionTerm):
+    """Footstep Controller (FSC) Action Term"""
 
-    def __init__(self, cfg: "MPCActionCfg", env: ManagerBasedEnv):
+    def __init__(self, cfg: "FSCActionCfg", env: ManagerBasedEnv):
         """Initialize the action term.
 
         Args:
@@ -26,19 +26,13 @@ class MPCActionTerm(ActionTerm):
         """
         super().__init__(cfg, env)
         # for type hinting
-        self.cfg: "MPCActionCfg"
+        self.cfg: "FSCActionCfg"
         self._asset: Articulation  # type: ignore
 
         # setup parallel robot controllers
         if self.cfg.robot_controllers is None:
             raise ValueError("robot_controllers must be set in the cfg before initialization.")
         self.robot_controllers = self.cfg.robot_controllers
-
-        # resolve the joints over which the action term is applied
-        self._joint_ids, self._joint_names = self._asset.find_joints(
-            self.cfg.joint_names, preserve_order=True
-        )
-        self._num_joints = len(self._joint_ids)
 
         self._raw_actions = torch.zeros(
             (self.num_envs, self.action_dim), device=self.device
@@ -61,6 +55,21 @@ class MPCActionTerm(ActionTerm):
     @property
     def processed_actions(self) -> torch.Tensor:
         return self._processed_actions
+    
+    def footsetep_kwargs(self, processed_actions: torch.Tensor) -> dict[str, Any]:
+        """Generate the kwargs for the footstep initiation call.
+
+        Args:
+            processed_actions: The processed actions.
+
+        Returns:
+            A dictionary of keyword arguments for the footstep initiation call.
+        """
+        return {
+            "leg": int(processed_actions[0]),
+            "location_hip": processed_actions[1:3].cpu().numpy(),
+            "duration": float(processed_actions[3]),
+        }
 
     def process_actions(self, actions: torch.Tensor):
         """Processes the actions sent to the environment.
@@ -71,8 +80,16 @@ class MPCActionTerm(ActionTerm):
         Args:
             actions: The actions to process.
         """
-        self._raw_actions[:] = actions
-        self._processed_actions = self._raw_actions  # no processing for now
+        # initiate the footstep if specified by the actions
+        self._raw_actions = actions
+        self._processed_actions = self._raw_actions  # no processing needed
+        
+
+        self.robot_controllers.call(
+            function=sim2real.Sim2RealInterface.initiate_footstep,
+            mask=None,
+            **self.footsetep_kwargs(self._processed_actions[0]),
+        )
 
     def apply_actions(self):
         """Applies the actions to the asset managed by the term.
@@ -80,14 +97,8 @@ class MPCActionTerm(ActionTerm):
         Note:
             This is called at every simulation step by the manager.
         """
-        processed_actions_cpu = self.processed_actions.cpu().numpy()
-        torques = controls_to_joint_efforts(
-            scene=self._env.scene,
-            controllers=self.robot_controllers,
-            controls=processed_actions_cpu,
-            asset_name=self.cfg.asset_name,
-        )
-        self._asset.set_joint_effort_target(torques, self._joint_ids)
+        # we don't do anything here
+        pass
     
     def reset(self, env_ids: Sequence[int] | None = None):
         """Reset the action term.
@@ -95,30 +106,18 @@ class MPCActionTerm(ActionTerm):
         Args:
             env_ids: The environment IDs to reset.
         """
-        # convert env_ids to numpy arrray if not none
-        if isinstance(env_ids, torch.Tensor):
-            env_ids = env_ids.cpu().numpy()  # type: ignore
-
-        self._raw_actions[env_ids] = 0.0
-        self._processed_actions[env_ids] = 0.0
-        self.robot_controllers.call(
-            function = sim2real.Sim2RealInterface.reset,
-            mask = env_ids,  # type: ignore
-        )
-
+        super().reset(env_ids)
 
 @configclass
-class MPCActionCfg(ActionTermCfg):
-    """Configuration for the MPC Action Term"""
+class FSCActionCfg(ActionTermCfg):
+    """Configuration for the Footstep Controller (FSC) Action Term"""
 
-    class_type: type[ActionTerm] = MPCActionTerm
+    class_type: type[ActionTerm] = FSCActionTerm
 
     robot_controllers: VectorPool[sim2real.Sim2RealInterface] | None = None
     """Pre-initialized robot controllers to use.
     Needs to be set to non-None value before initializing the action term.
     """
 
-    joint_names: Sequence[str] = [".*"]
-    """Regex patterns for the joint names to apply the action over.
-    This should match what the controller expects.
-    """
+    footstep_duration: float = 0.2
+    """Duration of each footstep in seconds."""
