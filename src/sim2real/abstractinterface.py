@@ -83,3 +83,8 @@ class Sim2RealInterface(ABC):
                 value in [0, 1], where 0 is the start of swing and 1 is the end of swing
         """
         pass
+
+    @abstractmethod
+    def reset(self):
+        """Reset the internal state of the controller."""
+        pass

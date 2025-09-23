@@ -85,13 +85,13 @@ def interface_to_isaac_torques(torques_interface: np.ndarray) -> np.ndarray:
 
 
 def controls_to_joint_efforts(
-    controls: np.ndarray, controllers: VectorPool, scene: InteractiveScene
+    controls: np.ndarray, controllers: VectorPool, scene: InteractiveScene, asset_name: str = "robot"
 ) -> torch.Tensor:
-    joint_pos = scene["robot"].data.joint_pos.cpu().numpy()
-    joint_vel = scene["robot"].data.joint_vel.cpu().numpy()
+    joint_pos = scene[asset_name].data.joint_pos.cpu().numpy()
+    joint_vel = scene[asset_name].data.joint_vel.cpu().numpy()
     joint_states = isaac_joints_to_interface(joint_pos, joint_vel)
 
-    body_state = scene["robot"].data.root_state_w.cpu().numpy()
+    body_state = scene[asset_name].data.root_state_w.cpu().numpy()
     body_state = isaac_body_to_interface(body_state)
 
     torques_interface = controllers.call(
