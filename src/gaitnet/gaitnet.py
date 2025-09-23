@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from src.util import log_exceptions
+from src.gaitnet.footstep_action import NO_STEP
 from src import get_logger
 
 logger = get_logger()
@@ -232,7 +233,7 @@ class GaitNetActorCritic(ActorCritic):
 
         Returns:
             actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
-                    For no-action: [-1, 0, 0, 0]
+                    For no-action: [NO_STEP, 0, 0, 0]
         """
         # Parse observations
         robot_state = observations[:, : self.robot_state_dim]
@@ -259,7 +260,7 @@ class GaitNetActorCritic(ActorCritic):
 
         # Now convert selected indices to actual action parameters
         # get the associated footstep option or no-action for each selected index
-        noop = torch.tensor([-1.0, 0.0, 0.0], device=observations.device)
+        noop = torch.tensor([NO_STEP, 0.0, 0.0], device=observations.device)
         footstep_options_with_noop = torch.cat(
             [
                 footstep_options,
