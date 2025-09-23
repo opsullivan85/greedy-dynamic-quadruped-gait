@@ -1,11 +1,8 @@
 from ast import Num
 from rsl_rl.modules import ActorCritic
-from rsl_rl.algorithms import PPO
-from rsl_rl.runners import OnPolicyRunner
 import torch
 import torch.nn as nn
 
-from src.util import log_exceptions
 from src.gaitnet.footstep_action import NO_STEP
 from src import get_logger
 
@@ -281,11 +278,3 @@ class GaitNetActorCritic(ActorCritic):
         Compute value estimate for observations.
         """
         return self.critic(critic_observations)
-
-
-def main(): ...
-
-
-if __name__ == "__main__":
-    with log_exceptions(logger):
-        main()

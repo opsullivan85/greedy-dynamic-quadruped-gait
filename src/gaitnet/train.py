@@ -1,9 +1,11 @@
-from src.gaitnet import train
 from src.util import log_exceptions
 from src import get_logger
+
 logger = get_logger()
 
+def main(): ...
+
+
 if __name__ == "__main__":
-    from src.util import log_exceptions
     with log_exceptions(logger):
-        train.main()
+        main()

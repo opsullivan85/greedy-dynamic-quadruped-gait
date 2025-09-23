@@ -1,0 +1,19 @@
+import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp  # type: ignore
+from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.utils import configclass
+import math
+
+
+@configclass
+class TerminationsCfg:
+    """Termination terms for the MDP."""
+
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
+    bad_orientation = DoneTerm(
+        func=mdp.bad_orientation,
+        params={
+            "limit_angle": math.radians(20),
+            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
+        },
+    )
