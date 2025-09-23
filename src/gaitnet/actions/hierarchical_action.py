@@ -15,18 +15,19 @@ class HierarchicalActionTerm(ActionTerm):
         super().__init__(cfg, env)
 
         # create the action term
-        self._inner_term = cfg.action_cfg.class_type(cfg.action_cfg, self._env)
+        self.inner = cfg.action_cfg.class_type(cfg.action_cfg, self._env)
+        """The action term being wrapped"""
         self._skip = cfg.skip
         self._step_count = 0
         # sanity check if term is valid type
-        if not isinstance(self._inner_term, ActionTerm):
+        if not isinstance(self.inner, ActionTerm):
             raise TypeError(f"Returned object for the term 'action_cfg' is not of type ActionTerm.")
 
     # deffer to the inner term for all un-defined functions
     def __getattr__(self, key):
         if key in self.__dict__:
             return self.__dict__[key]
-        return getattr(self._inner_term, key)
+        return getattr(self.inner, key)
     
     def apply_actions(self):
         """Applies the actions to the asset managed by the term.
@@ -37,7 +38,7 @@ class HierarchicalActionTerm(ActionTerm):
             This is called at every simulation step by the manager.
         """
         if self._step_count % self._skip == 0:
-            self._inner_term.apply_actions()
+            self.inner.apply_actions()
         self._step_count += 1
 
 

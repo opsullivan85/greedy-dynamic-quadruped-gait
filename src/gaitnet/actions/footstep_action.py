@@ -130,6 +130,3 @@ class FSCActionCfg(ActionTermCfg):
     """Pre-initialized robot controllers to use.
     Needs to be set to non-None value before initializing the action term.
     """
-
-    footstep_duration: float = 0.2
-    """Duration of each footstep in seconds."""

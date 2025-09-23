@@ -1,11 +1,13 @@
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.utils import configclass
 
+from src import sim2real
 from src.simulation.cfg.scene import SceneCfg
 import numpy as np
 
 from src import get_logger
 import env_cfg
+from src.util import VectorPool
 
 logger = get_logger()
 
@@ -23,6 +25,8 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
     events: env_cfg.EventsCfg = env_cfg.EventsCfg()  # type: ignore
     terminations: env_cfg.TerminationsCfg = env_cfg.TerminationsCfg()  # type: ignore
     rewards: env_cfg.RewardsCfg = env_cfg.RewardsCfg()  # type: ignore
+
+    robot_controllers: VectorPool[sim2real.Sim2RealInterface] = None  # type: ignore to be set later
 
     # ['trunk', 'FL_hip', 'FR_hip', 'RL_hip', 'RR_hip', 'FL_thigh', 'FR_thigh', 'RL_thigh', 'RR_thigh', 'FL_calf', 'FR_calf', 'RL_calf', 'RR_calf', 'FL_foot', 'FR_foot', 'RL_foot', 'RR_foot']
     hip_indices = np.asarray([1, 2, 3, 4], dtype=np.int32)
@@ -58,6 +62,18 @@ def get_gaitnet_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
         GaitNetEnvCfg: The environment configuration.
     """
     cfg = GaitNetEnvCfg()
+    controllers = VectorPool(
+        instances=num_envs,
+        cls=sim2real.SimInterface,
+        dt=cfg.decimation * cfg.sim.dt,  # 500 Hz leg PD control
+        iterations_between_mpc=5, # 50 Hz MPC
+        debug_logging=False,
+    )
+    cfg.robot_controllers = controllers  # type: ignore
+    cfg.actions.footstep_controller.robot_controllers = controllers  # type: ignore
+    cfg.actions.mpc_controller.robot_controllers = controllers  # type: ignore
+
+
     cfg.scene.num_envs = num_envs
     cfg.sim.device = device
     # update sensor update periods
