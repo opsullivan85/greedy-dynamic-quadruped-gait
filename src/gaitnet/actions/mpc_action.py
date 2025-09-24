@@ -3,7 +3,7 @@
 from dataclasses import MISSING
 from typing import Any, Sequence
 from isaaclab.assets import Articulation
-from isaaclab.envs import ManagerBasedEnv
+from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
 from isaaclab.managers import ActionTerm, ActionTermCfg
 from isaaclab.utils import configclass
 import torch
@@ -126,20 +126,21 @@ class MPCActionCfg(ActionTermCfg):
 ###############################################################################
 ###############################################################################
 
-class MPCControlActionTerm(ActionTerm):
+class MPCControlActionTerm(MPCActionTerm):
     """MPC Control Action Term, gets commands from control input"""
 
-    def __init__(self, cfg: "MPCControlActionCfg", env: ManagerBasedEnv):
+    def __init__(self, cfg: "MPCControlActionCfg", env: ManagerBasedRLEnv):
         """Initialize the action term.
 
         Args:
             cfg: The configuration object.
             env: The environment instance.
         """
-        super().__init__(cfg, env)
+        super().__init__(cfg, env)  # type: ignore
         # for type hinting
-        self.cfg: "MPCActionCfg"
+        self.cfg: "MPCControlActionCfg"  # type: ignore
         self._asset: Articulation  # type: ignore
+        self._env: ManagerBasedRLEnv  # type: ignore
 
         # setup parallel robot controllers
         if self.cfg.robot_controllers is None:
@@ -157,22 +158,10 @@ class MPCControlActionTerm(ActionTerm):
         )
         self._processed_actions = self._raw_actions
 
-    def __del__(self):
-        super().__del__()
-        del self.robot_controllers
-
     @property
     def action_dim(self) -> int:
         """Dimension of the action term."""
         return 0
-
-    @property
-    def raw_actions(self) -> torch.Tensor:
-        return self._raw_actions
-
-    @property
-    def processed_actions(self) -> torch.Tensor:
-        return self._processed_actions
 
     def process_actions(self, actions: torch.Tensor):
         """Processes the actions sent to the environment.
@@ -183,40 +172,10 @@ class MPCControlActionTerm(ActionTerm):
         Args:
             actions: The actions to process.
         """
-        self._raw_actions[:] = actions
+        # we expect actions to be empty, get real actions from command
+
+        self._raw_actions[:] = self._env.command_manager.get_command(self.cfg.command_name)
         self._processed_actions = self._raw_actions  # no processing for now
-
-    def apply_actions(self):
-        """Applies the actions to the asset managed by the term.
-
-        Note:
-            This is called at every simulation step by the manager.
-        """
-        processed_actions_cpu = self.processed_actions.cpu().numpy()
-        torques = controls_to_joint_efforts(
-            scene=self._env.scene,
-            controllers=self.robot_controllers,
-            controls=processed_actions_cpu,
-            asset_name=self.cfg.asset_name,
-        )
-        self._asset.set_joint_effort_target(torques, self._joint_ids)
-    
-    def reset(self, env_ids: Sequence[int] | None = None):
-        """Reset the action term.
-
-        Args:
-            env_ids: The environment IDs to reset.
-        """
-        # convert env_ids to numpy arrray if not none
-        if isinstance(env_ids, torch.Tensor):
-            env_ids = env_ids.cpu().numpy()  # type: ignore
-
-        self._raw_actions[env_ids] = 0.0
-        self._processed_actions[env_ids] = 0.0
-        self.robot_controllers.call(
-            function = sim2real.Sim2RealInterface.reset,
-            mask = env_ids,  # type: ignore
-        )
 
 
 @configclass
@@ -224,6 +183,9 @@ class MPCControlActionCfg(ActionTermCfg):
     """Configuration for the MPC Action Term"""
 
     class_type: type[ActionTerm] = MPCActionTerm
+
+    command_name: str = MISSING  # type: ignore
+    """Name of the command to use as input."""
 
     robot_controllers: VectorPool[sim2real.Sim2RealInterface] | None = None
     """Pre-initialized robot controllers to use.

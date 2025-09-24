@@ -1,9 +1,8 @@
-from ast import Num
 from rsl_rl.modules import ActorCritic
 import torch
 import torch.nn as nn
 
-from src.gaitnet.footstep_action import NO_STEP
+from src.gaitnet.actions.footstep_action import NO_STEP
 from src import get_logger
 
 logger = get_logger()
