@@ -51,7 +51,7 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 5
 
 
-def get_gaitnet_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
+def get_gaitnet_env_cfg(num_envs: int, device: str, iterations_between_mpc: int) -> GaitNetEnvCfg:
     """Get the gaitnet environment configuration.
 
     Args:
@@ -66,7 +66,7 @@ def get_gaitnet_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
         instances=num_envs,
         cls=sim2real.SimInterface,
         dt=cfg.decimation * cfg.sim.dt,  # 500 Hz leg PD control
-        iterations_between_mpc=5, # 50 Hz MPC
+        iterations_between_mpc=iterations_between_mpc,
         debug_logging=False,
     )
     cfg.robot_controllers = controllers  # type: ignore
