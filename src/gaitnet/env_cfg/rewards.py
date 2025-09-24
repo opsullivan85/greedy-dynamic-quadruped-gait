@@ -1,4 +1,4 @@
-import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp  # type: ignore
+from isaaclab.envs import mdp
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.utils import configclass
 

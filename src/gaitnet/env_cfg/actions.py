@@ -1,4 +1,3 @@
-import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp  # type: ignore
 from isaaclab.utils import configclass
 from src.gaitnet.actions.footstep_action import FSCActionCfg
 from src.gaitnet.actions.hierarchical_action import HierarchicalActionCfg

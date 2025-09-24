@@ -2,7 +2,7 @@ import math
 
 # import isaaclab.envs.mdp as mdp  # type: ignore
 from isaaclab.envs.mdp import bad_orientation
-import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp  # type: ignore
+from isaaclab.envs import mdp  # type: ignore
 import torch
 from isaaclab.envs import ManagerBasedEnv  # type: ignore
 from isaaclab.managers import EventTermCfg as EventTerm  # type: ignore

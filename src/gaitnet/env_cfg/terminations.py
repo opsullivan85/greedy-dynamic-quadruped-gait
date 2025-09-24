@@ -1,4 +1,4 @@
-import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp  # type: ignore
+from isaaclab.envs import mdp
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass

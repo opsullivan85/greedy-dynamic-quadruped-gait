@@ -1,4 +1,4 @@
-import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp  # type: ignore
+from isaaclab.envs import mdp
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
@@ -10,7 +10,7 @@ class EventsCfg:
 
     # startup
     physics_material = EventTerm(
-        func=mdp.randomize_rigid_body_material,
+        func=mdp.randomize_rigid_body_material,  # type: ignore
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
