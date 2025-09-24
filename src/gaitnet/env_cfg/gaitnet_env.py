@@ -1,4 +1,4 @@
-from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
 from isaaclab.utils import configclass
 
 from src import sim2real
@@ -6,7 +6,11 @@ from src.simulation.cfg.scene import SceneCfg
 import numpy as np
 
 from src import get_logger
-import env_cfg
+from src.gaitnet.env_cfg.observations import ObservationsCfg
+from src.gaitnet.env_cfg.actions import ActionsCfg
+from src.gaitnet.env_cfg.events import EventsCfg
+from src.gaitnet.env_cfg.terminations import TerminationsCfg
+from src.gaitnet.env_cfg.rewards import RewardsCfg
 from src.util import VectorPool
 
 logger = get_logger()
@@ -20,11 +24,11 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
     scene: SceneCfg = SceneCfg(env_spacing=2.5)  # type: ignore
 
     # Basic settings
-    observations: env_cfg.ObservationsCfg = env_cfg.ObservationsCfg()  # type: ignore
-    actions: env_cfg.ActionsCfg = env_cfg.ActionsCfg()  # type: ignore
-    events: env_cfg.EventsCfg = env_cfg.EventsCfg()  # type: ignore
-    terminations: env_cfg.TerminationsCfg = env_cfg.TerminationsCfg()  # type: ignore
-    rewards: env_cfg.RewardsCfg = env_cfg.RewardsCfg()  # type: ignore
+    observations: ObservationsCfg = ObservationsCfg()  # type: ignore
+    actions: ActionsCfg = ActionsCfg()  # type: ignore
+    events: EventsCfg = EventsCfg()  # type: ignore
+    terminations: TerminationsCfg = TerminationsCfg()  # type: ignore
+    rewards: RewardsCfg = RewardsCfg()  # type: ignore
 
     robot_controllers: VectorPool[sim2real.Sim2RealInterface] = None  # type: ignore to be set later
 
@@ -51,28 +55,8 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 5
 
 
-def get_gaitnet_env_cfg(num_envs: int, device: str, iterations_between_mpc: int) -> GaitNetEnvCfg:
-    """Get the gaitnet environment configuration.
-
-    Args:
-        num_envs (int): Number of environments.
-        device (str): Device to use.
-
-    Returns:
-        GaitNetEnvCfg: The environment configuration.
-    """
+def _make_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
     cfg = GaitNetEnvCfg()
-    controllers = VectorPool(
-        instances=num_envs,
-        cls=sim2real.SimInterface,
-        dt=cfg.decimation * cfg.sim.dt,  # 500 Hz leg PD control
-        iterations_between_mpc=iterations_between_mpc,
-        debug_logging=False,
-    )
-    cfg.robot_controllers = controllers  # type: ignore
-    cfg.actions.footstep_controller.robot_controllers = controllers  # type: ignore
-    cfg.actions.mpc_controller.robot_controllers = controllers  # type: ignore
-
 
     cfg.scene.num_envs = num_envs
     cfg.sim.device = device
@@ -87,3 +71,34 @@ def get_gaitnet_env_cfg(num_envs: int, device: str, iterations_between_mpc: int)
     ]:
         scanner.update_period = cfg.decimation * cfg.sim.dt  # control rate
     return cfg
+
+
+def _update_controllers(
+    cfg: GaitNetEnvCfg, num_envs: int
+) -> None:
+    """Update the controllers in the environment configuration.
+
+    Args:
+        envcfg (GaitNetEnvCfg): The environment configuration.
+        controllers (VectorPool[sim2real.Sim2RealInterface]): The controllers to set.
+    """
+    controllers: VectorPool[sim2real.Sim2RealInterface] = VectorPool(
+        instances=num_envs,
+        cls=sim2real.SimInterface,
+        dt=cfg.decimation * cfg.sim.dt,  # 500 Hz leg PD control
+        iterations_between_mpc=5,  # 50 Hz MPC
+        debug_logging=False,
+    )
+    cfg.robot_controllers = controllers  # type: ignore
+    cfg.actions.footstep_controller.robot_controllers = controllers  # type: ignore
+    cfg.actions.mpc_controller.robot_controllers = controllers  # type: ignore
+
+
+def get_env(
+    num_envs: int, device: str
+) -> tuple[GaitNetEnvCfg, ManagerBasedRLEnv]:
+    """Get the environment configuration and the environment instance."""
+    env_cfg = _make_env_cfg(num_envs, device)
+    env = ManagerBasedRLEnv(cfg=env_cfg)
+    _update_controllers(env_cfg, num_envs)
+    return env_cfg, env

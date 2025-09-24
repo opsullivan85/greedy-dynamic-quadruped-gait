@@ -12,6 +12,9 @@ from src import sim2real
 from src.util import VectorPool
 from src.simulation.util import controls_to_joint_efforts
 import numpy as np
+from src import get_logger
+
+logger = get_logger()
 
 
 class MPCActionTerm(ActionTerm):
@@ -31,8 +34,8 @@ class MPCActionTerm(ActionTerm):
 
         # setup parallel robot controllers
         if self.cfg.robot_controllers is None:
-            raise ValueError("robot_controllers must be set in the cfg before initialization.")
-        self.robot_controllers = self.cfg.robot_controllers
+            logger.warning("robot_controllers is None, must be set before stepping the env.")
+        self.robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.cfg.robot_controllers  # type: ignore
 
         # resolve the joints over which the action term is applied
         self._joint_ids, self._joint_names = self._asset.find_joints(
@@ -144,8 +147,8 @@ class MPCControlActionTerm(MPCActionTerm):
 
         # setup parallel robot controllers
         if self.cfg.robot_controllers is None:
-            raise ValueError("robot_controllers must be set in the cfg before initialization.")
-        self.robot_controllers = self.cfg.robot_controllers
+            logger.warning("robot_controllers is None, must be set before stepping the env.")
+        self.robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.cfg.robot_controllers  # type: ignore
 
         # resolve the joints over which the action term is applied
         self._joint_ids, self._joint_names = self._asset.find_joints(
@@ -182,7 +185,7 @@ class MPCControlActionTerm(MPCActionTerm):
 class MPCControlActionCfg(ActionTermCfg):
     """Configuration for the MPC Action Term"""
 
-    class_type: type[ActionTerm] = MPCActionTerm
+    class_type: type[ActionTerm] = MPCControlActionTerm
 
     command_name: str = MISSING  # type: ignore
     """Name of the command to use as input."""

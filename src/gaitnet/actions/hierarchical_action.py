@@ -2,6 +2,8 @@
 """
 
 from dataclasses import MISSING
+
+import torch
 from isaaclab.envs import ManagerBasedEnv
 from isaaclab.managers import ActionTerm, ActionTermCfg
 from isaaclab.utils import configclass
@@ -23,8 +25,9 @@ class HierarchicalActionTerm(ActionTerm):
         if not isinstance(self.inner, ActionTerm):
             raise TypeError(f"Returned object for the term 'action_cfg' is not of type ActionTerm.")
 
-    # deffer to the inner term for all un-defined functions
     def __getattr__(self, key):
+        """Defers attribute access to the inner action term.
+        """
         if key in self.__dict__:
             return self.__dict__[key]
         return getattr(self.inner, key)
@@ -40,6 +43,23 @@ class HierarchicalActionTerm(ActionTerm):
         if self._step_count % self._skip == 0:
             self.inner.apply_actions()
         self._step_count += 1
+
+    # the following need to be explicitly defined to avoid ABC errors
+
+    @property
+    def action_dim(self) -> int:
+        return self.inner.action_dim
+
+    @property
+    def raw_actions(self) -> torch.Tensor:
+        return self.inner.raw_actions
+
+    @property
+    def processed_actions(self) -> torch.Tensor:
+        return self.inner.processed_actions
+    
+    def process_actions(self, actions: torch.Tensor):
+        return self.inner.process_actions(actions)
 
 
 @configclass

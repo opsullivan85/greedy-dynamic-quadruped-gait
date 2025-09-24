@@ -12,6 +12,9 @@ from src import sim2real
 from src.util import VectorPool
 from src.simulation.util import controls_to_joint_efforts
 import numpy as np
+from src import get_logger
+
+logger = get_logger()
 
 NO_STEP = -1  # special value for no step
 
@@ -32,8 +35,8 @@ class FSCActionTerm(ActionTerm):
 
         # setup parallel robot controllers
         if self.cfg.robot_controllers is None:
-            raise ValueError("robot_controllers must be set in the cfg before initialization.")
-        self.robot_controllers = self.cfg.robot_controllers
+            logger.warning("robot_controllers is None, must be set before stepping the env.")
+        self.robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.cfg.robot_controllers  # type: ignore
 
         self._raw_actions = torch.zeros(
             (self.num_envs, self.action_dim), device=self.device

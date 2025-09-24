@@ -1,15 +1,31 @@
 from isaaclab.app import AppLauncher
 import argparse
 
-from src.gaitnet.gaitnet import GaitNetActorCritic
-
 # add argparse arguments
-parser = argparse.ArgumentParser(description="Train an RL agent with Stable-Baselines3.")
-parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
-parser.add_argument("--max_iterations", type=int, default=10000, help="RL Policy training iterations.")
-parser.add_argument("--export_io_descriptors", action="store_true", default=False, help="Export IO descriptors.")
-parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume training from.")
+parser = argparse.ArgumentParser(
+    description="Train an RL agent with Stable-Baselines3."
+)
+parser.add_argument(
+    "--num_envs", type=int, default=100, help="Number of environments to simulate."
+)
+parser.add_argument(
+    "--seed", type=int, default=None, help="Seed used for the environment"
+)
+parser.add_argument(
+    "--max_iterations", type=int, default=10000, help="RL Policy training iterations."
+)
+parser.add_argument(
+    "--export_io_descriptors",
+    action="store_true",
+    default=False,
+    help="Export IO descriptors.",
+)
+parser.add_argument(
+    "--resume",
+    type=str,
+    default=None,
+    help="Path to checkpoint to resume training from.",
+)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -23,10 +39,10 @@ import multiprocessing
 import signal
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper  # type: ignore
+from src.gaitnet.gaitnet import GaitNetActorCritic
 from rsl_rl.algorithms import PPO
 from rsl_rl.runners import OnPolicyRunner
-from src.gaitnet.env_cfg import GaitNetEnvCfg
-from src.gaitnet.env_cfg.gaitnet_env import get_gaitnet_env_cfg
+from src.gaitnet.env_cfg.gaitnet_env import get_env
 from src.util import log_exceptions
 from src import get_logger
 
@@ -52,23 +68,24 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 def main():
-    env_cfg: GaitNetEnvCfg = get_gaitnet_env_cfg(
-        num_envs=args_cli.num_envs,
-        device=args_cli.device,
-        iterations_between_mpc=5,  # 50 Hz MPC
+    env_cfg, env = get_env(
+        num_envs=args_cli.num_envs, 
+        device=args_cli.device, 
     )
-    env = ManagerBasedRLEnv(cfg=env_cfg)
 
     # wrap for RL training
     env = RslRlVecEnvWrapper(env)
 
+    obs_space = env.observation_space["policy"].shape[1]
+    action_space = env.action_space.shape[1]
+    num_footstep_candidates = 5
     # Create actor-critic network
     actor_critic = GaitNetActorCritic(
-        num_obs=1,  # TODO: how do I get this from the observer?
-        num_actions=6,  # 5 footstep options + 1 no-action
+        robot_state_dim=obs_space,
+        num_footstep_options=num_footstep_candidates,
         hidden_dims=[256, 256],
     )
-    
+
     # Configure PPO
     ppo_cfg = {
         "value_loss_coef": 1.0,
@@ -81,10 +98,10 @@ def main():
         "schedule": "adaptive",
         "desired_kl": 0.01,
     }
-    
+
     # Create PPO algorithm
     ppo = PPO(actor_critic, **ppo_cfg)
-    
+
     # Create runner
     runner = OnPolicyRunner(
         env=env,
@@ -104,13 +121,14 @@ def main():
 
     if args_cli.resume is not None:
         runner.load(args_cli.resume)
-    
+
     runner.learn(
         num_learning_iterations=args_cli.max_iterations,
         init_at_random_ep_len=True,
     )
 
     env.close()
+
 
 if __name__ == "__main__":
     with log_exceptions(logger):

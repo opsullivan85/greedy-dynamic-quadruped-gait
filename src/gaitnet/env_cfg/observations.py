@@ -14,26 +14,40 @@ from isaaclab.envs.utils.io_descriptors import (
 
 
 @generic_io_descriptor(
-    units="m", axes=["X", "Y", "Z"], observation_type="RootState", on_inspect=[record_shape, record_dtype]
+    units="m",
+    axes=["X", "Y", "Z"],
+    observation_type="RootState",
+    on_inspect=[record_shape, record_dtype],
 )
-def foot_position_xy_b(env: ManagerBasedEnv, transform_name: SceneEntityCfg = SceneEntityCfg("foot_transforms")) -> torch.Tensor:
+def foot_position_xy_b(
+    env: ManagerBasedEnv,
+    transform_name: SceneEntityCfg = SceneEntityCfg("foot_transforms"),
+    flatten: bool = False,
+) -> torch.Tensor:
     """Get foot xy positions in the base frame.
-    Assumes transform_name sensor exists in the scene, ex:
+        Assumes transform_name sensor exists in the scene, ex:
 
-.. code-block:: python
+    .. code-block:: python
 
-    foot_transforms = FrameTransformerCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/trunk",
-        target_frames=[
-            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/FL_foot"),
-            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/FR_foot"),
-            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/RL_foot"),
-            FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/RR_foot"),
-        ],
-        debug_vis=False,
-    )
+        foot_transforms = FrameTransformerCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/trunk",
+            target_frames=[
+                FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/FL_foot"),
+                FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/FR_foot"),
+                FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/RL_foot"),
+                FrameTransformerCfg.FrameCfg(prim_path="{ENV_REGEX_NS}/Robot/RR_foot"),
+            ],
+            debug_vis=False,
+        )
+
+    Args:
+        env: The environment instance.
+        transform_name: The name of the FrameTransformer sensor in the scene.
+        flatten: Whether to flatten the output to (N, 8) instead of (N, 4, 2).
     """
     foot_positions_b = env.scene[transform_name.name].data.target_pos_source[:, :, :2]
+    if flatten:
+        foot_positions_b = foot_positions_b.reshape(foot_positions_b.shape[0], -1)
     return foot_positions_b
 
 
@@ -44,21 +58,33 @@ class ObservationsCfg:
     @configclass
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
+
         base_pos_z = ObsTerm(
-            func=mdp.base_pos_z, noise=Unoise(n_min=-0.01, n_max=0.01)  # just made up this number
+            func=mdp.base_pos_z,
+            noise=Unoise(n_min=-0.01, n_max=0.01),  # just made up this number
         )
 
         foot_position_xy_b = ObsTerm(
-            func=foot_position_xy_b, noise=Unoise(n_min=-0.01, n_max=0.01)  # roughly 1/20 of the typical range
+            func=foot_position_xy_b,
+            noise=Unoise(n_min=-0.01, n_max=0.01),  # roughly 1/20 of the typical range
+            params={"flatten": True},
         )
 
         base_lin_vel = ObsTerm(
-            func=mdp.base_lin_vel, noise=Unoise(n_min=-0.01, n_max=0.01)  # roughly 1/10 of the max control input
+            func=mdp.base_lin_vel,
+            noise=Unoise(
+                n_min=-0.01, n_max=0.01
+            ),  # roughly 1/10 of the max control input
         )
 
         base_ang_vel = ObsTerm(
-            func=mdp.base_ang_vel, noise=Unoise(n_min=-0.02, n_max=0.02)  # roughly 1/10 of the max control input
+            func=mdp.base_ang_vel,
+            noise=Unoise(
+                n_min=-0.02, n_max=0.02
+            ),  # roughly 1/10 of the max control input
         )
+
+        # TODO: add contact state
 
         def __post_init__(self):
             self.enable_corruption = False
