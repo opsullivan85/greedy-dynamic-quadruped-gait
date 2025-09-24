@@ -11,6 +11,7 @@ from src.gaitnet.env_cfg.actions import ActionsCfg
 from src.gaitnet.env_cfg.events import EventsCfg
 from src.gaitnet.env_cfg.terminations import TerminationsCfg
 from src.gaitnet.env_cfg.rewards import RewardsCfg
+from src.gaitnet.env_cfg.commands import CommandsCfg
 from src.util import VectorPool
 
 logger = get_logger()
@@ -29,6 +30,7 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
     events: EventsCfg = EventsCfg()  # type: ignore
     terminations: TerminationsCfg = TerminationsCfg()  # type: ignore
     rewards: RewardsCfg = RewardsCfg()  # type: ignore
+    commands: CommandsCfg = CommandsCfg()  # type: ignore
 
     robot_controllers: VectorPool[sim2real.Sim2RealInterface] = None  # type: ignore to be set later
 

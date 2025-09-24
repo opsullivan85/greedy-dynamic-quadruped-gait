@@ -104,7 +104,7 @@ class ObservationsCfg:
 
         control = ObsTerm(
             func=mdp.generated_commands,
-            params={"command_name": ["base_velocity"]},
+            params={"command_name": "base_velocity"},
         )
 
         contact_state = ObsTerm(
@@ -123,6 +123,22 @@ class ObservationsCfg:
     class PrivilegedCfg(ObsGroup):
         """Observations for privileged group."""
 
-        # TODO: height sensor data
+        FR_foot_scanner = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("FR_foot_scanner")},
+        )
+        FL_foot_scanner = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("FL_foot_scanner")},
+        )
+        RL_foot_scanner = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("RL_foot_scanner")},
+        )
+        RR_foot_scanner = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("RR_foot_scanner")},
+        )
+
 
     privileged: PrivilegedCfg = PrivilegedCfg()
