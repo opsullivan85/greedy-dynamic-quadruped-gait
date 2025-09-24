@@ -142,24 +142,7 @@ class MPCControlActionTerm(MPCActionTerm):
         super().__init__(cfg, env)  # type: ignore
         # for type hinting
         self.cfg: "MPCControlActionCfg"  # type: ignore
-        self._asset: Articulation  # type: ignore
         self._env: ManagerBasedRLEnv  # type: ignore
-
-        # setup parallel robot controllers
-        if self.cfg.robot_controllers is None:
-            logger.warning("robot_controllers is None, must be set before stepping the env.")
-        self.robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.cfg.robot_controllers  # type: ignore
-
-        # resolve the joints over which the action term is applied
-        self._joint_ids, self._joint_names = self._asset.find_joints(
-            self.cfg.joint_names, preserve_order=True
-        )
-        self._num_joints = len(self._joint_ids)
-
-        self._raw_actions = torch.zeros(
-            (self.num_envs, self.action_dim), device=self.device
-        )
-        self._processed_actions = self._raw_actions
 
     @property
     def action_dim(self) -> int:

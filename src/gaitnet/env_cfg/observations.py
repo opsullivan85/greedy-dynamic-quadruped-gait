@@ -3,6 +3,7 @@ from isaaclab.envs import mdp
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.sensors import ContactSensor
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from src.gaitnet.actions.mpc_action import ManagerBasedEnv
@@ -51,6 +52,23 @@ def foot_position_xy_b(
     return foot_positions_b
 
 
+@generic_io_descriptor(
+    observation_type="RootState",
+    on_inspect=[record_shape, record_dtype],
+)
+def contact_state(
+    env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """Get the contact state from a sensor.
+    """
+    contact_forces = env.scene[sensor_cfg.name].data.net_forces_w
+    contacts = (
+        contact_forces.norm(dim=2) > env.scene["contact_forces"].cfg.force_threshold
+    )
+    return contacts
+
+
+
 @configclass
 class ObservationsCfg:
     """Observation specifications for the MDP."""
@@ -59,15 +77,15 @@ class ObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
 
-        base_pos_z = ObsTerm(
-            func=mdp.base_pos_z,
-            noise=Unoise(n_min=-0.01, n_max=0.01),  # just made up this number
-        )
-
         foot_position_xy_b = ObsTerm(
             func=foot_position_xy_b,
             noise=Unoise(n_min=-0.01, n_max=0.01),  # roughly 1/20 of the typical range
             params={"flatten": True},
+        )
+
+        base_pos_z = ObsTerm(
+            func=mdp.base_pos_z,
+            noise=Unoise(n_min=-0.01, n_max=0.01),  # just made up this number
         )
 
         base_lin_vel = ObsTerm(
@@ -84,7 +102,15 @@ class ObservationsCfg:
             ),  # roughly 1/10 of the max control input
         )
 
-        # TODO: add contact state
+        control = ObsTerm(
+            func=mdp.generated_commands,
+            params={"command_name": ["base_velocity"]},
+        )
+
+        contact_state = ObsTerm(
+            func=contact_state,
+            params={"sensor_cfg": SceneEntityCfg("contact_forces")},
+        )
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -92,3 +118,11 @@ class ObservationsCfg:
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
+
+    @configclass
+    class PrivilegedCfg(ObsGroup):
+        """Observations for privileged group."""
+
+        # TODO: height sensor data
+
+    privileged: PrivilegedCfg = PrivilegedCfg()

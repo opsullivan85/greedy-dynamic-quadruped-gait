@@ -170,36 +170,50 @@ class GaitNetActorCritic(ActorCritic):
 
     def __init__(
         self,
-        num_obs: int,
-        num_actions: int,
-        hidden_dims: list = [256, 256],
-        activation: str = "relu",
-        init_noise_std: float = 1.0,
-        robot_state_dim: int = 22,
-        num_footstep_options: int = 5,
+        num_actor_obs=None,
+        num_critic_obs=None,
+        num_actions=None,
+        robot_state_dim=22,
+        num_footstep_options=5,
+        hidden_dims=[256, 256],
+        activation="relu",
+        init_noise_std=1.0,
+        noise_std_type="scalar",
         **kwargs
     ):
-        """Initialize the GaitNetActorCritic.
-
+        """
+        Initialize the GaitNetActorCritic.
         Args:
-            num_obs (int): Number of observation dimensions.
-            num_actions (int): Number of action dimensions.
-            hidden_dims (list, optional): Hidden dimensions for the network. Defaults to [256, 256].
-            activation (str, optional): Activation function to use. Defaults to "relu".
-            init_noise_std (float, optional): Standard deviation for initial noise. Defaults to 1.0.
             robot_state_dim (int, optional): Dimension of the robot state representation. Defaults to 22.
             num_footstep_options (int, optional): Number of footstep options. Defaults to 5.
+            hidden_dims (list, optional): Hidden dimensions for the network. Defaults to [256, 256].
         """
-        # For our case: num_actions = 6 (5 footstep options + 1 no-action)
-        super().__init__(
-            num_obs, num_actions, hidden_dims, activation, init_noise_std, **kwargs
-        )
-
-        # Override with our custom architecture
         self.robot_state_dim = robot_state_dim
         self.num_footstep_options = num_footstep_options
+        self.hidden_dims = hidden_dims
 
-        # Replace the actor with our value-based network
+        # Calculate observation and action dimensions for parent class
+        num_obs = robot_state_dim + (num_footstep_options * 3)
+        num_actions = 4
+
+        # Use provided or calculated values
+        num_actor_obs = num_actor_obs if num_actor_obs is not None else num_obs
+        num_critic_obs = num_critic_obs if num_critic_obs is not None else num_obs
+
+        # Call parent constructor
+        super().__init__(
+            num_actor_obs=num_actor_obs,
+            num_critic_obs=num_critic_obs,
+            num_actions=num_actions,
+            actor_hidden_dims=hidden_dims,
+            critic_hidden_dims=hidden_dims,
+            activation=activation,
+            init_noise_std=init_noise_std,
+            noise_std_type=noise_std_type,
+            **kwargs
+        )
+
+        # Override the actor with our custom value-based network
         self.actor = Gaitnet(
             robot_state_dim=self.robot_state_dim,
             shared_encoder_dim=hidden_dims[0] // 2,
@@ -207,16 +221,75 @@ class GaitNetActorCritic(ActorCritic):
             hidden_dim=hidden_dims[0],
         )
 
-        # Keep standard value network for critic
+        # Replace the critic with our custom architecture
         self.critic = nn.Sequential(
-            nn.Linear(num_obs, hidden_dims[0]),
+            nn.Linear(num_critic_obs, hidden_dims[0]),
             nn.LayerNorm(hidden_dims[0]),
             nn.ReLU(),
-            nn.Linear(hidden_dims[0], hidden_dims[1]),
-            nn.LayerNorm(hidden_dims[1]),
+            nn.Linear(
+                hidden_dims[0],
+                hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0],
+            ),
+            nn.LayerNorm(hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0]),
             nn.ReLU(),
-            nn.Linear(hidden_dims[1], 1),
+            nn.Linear(hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0], 1),
         )
+
+        self.num_obs = num_obs
+        self.num_actions = num_actions
+
+        # Distribution for RL compatibility
+        self.distribution: torch.distributions.Categorical = None  # type: ignore
+
+    def update_distribution(self, observations):
+        """
+        Update the action distribution for RL sampling.
+        """
+        robot_state = observations[:, :self.robot_state_dim]
+        footstep_options_flat = observations[:, self.robot_state_dim:]
+        batch_size = observations.shape[0]
+        footstep_options = footstep_options_flat.reshape(
+            batch_size, self.num_footstep_options, 3
+        )
+        action_values, _ = self.actor(robot_state, footstep_options)
+        action_probs = nn.functional.softmax(action_values, dim=-1)
+        self.distribution = torch.distributions.Categorical(action_probs)
+
+    def get_actions_log_prob(self, actions):
+        """
+        Get log probabilities of actions for RL training.
+        """
+        # actions: (batch, 4) [leg_idx, dx, dy, swing_duration]
+        # We map actions to their selected index (leg_idx, dx, dy, duration)
+        # For compatibility, assume leg_idx is the index (for discrete selection)
+        # If no-action, leg_idx == NO_STEP, which is last index
+        batch_size = actions.shape[0]
+        indices = actions[:, 0].long()
+        # If leg_idx == NO_STEP, set to last index
+        indices = torch.where(indices == NO_STEP, torch.tensor(self.num_footstep_options, device=actions.device), indices)
+        # Get log prob from distribution
+        log_probs = self.distribution.log_prob(indices)
+        return log_probs
+
+    @property
+    def action_mean(self):
+        # Not meaningful for categorical, but required for compatibility
+        return torch.zeros(self.num_actions, device=next(self.parameters()).device)
+
+    @property
+    def action_std(self):
+        # Not meaningful for categorical, but required for compatibility
+        return torch.ones(self.num_actions, device=next(self.parameters()).device)
+
+    @property
+    def entropy(self):
+        return self.distribution.entropy()
+
+    def act_inference(self, observations):
+        """
+        Deterministic action selection for inference.
+        """
+        return self.act(observations, deterministic=True)
 
     def act(self, observations: torch.Tensor, **kwargs) -> torch.Tensor:
         """
@@ -225,7 +298,7 @@ class GaitNetActorCritic(ActorCritic):
         Args:
             observations: (batch, num_obs) tensor of observations
                 [:, :robot_state_dim] - robot state
-                [:, robot_state_dim:] - footstep options (leg_idx, horizontal_idx, vertical_idx)*num_options flattened
+                [:, robot_state_dim:] - footstep options (leg_idx, dx, dy)*num_options flattened
 
         Returns:
             actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
@@ -255,22 +328,33 @@ class GaitNetActorCritic(ActorCritic):
             selected_indices = dist.sample()
 
         # Now convert selected indices to actual action parameters
-        # get the associated footstep option or no-action for each selected index
-        noop = torch.tensor([NO_STEP, 0.0, 0.0], device=observations.device)
+        # Create no-action option
+        batch_size = observations.shape[0]
+        device = observations.device
+        noop = torch.tensor([NO_STEP, 0.0, 0.0], device=device)
+
+        # Combine footstep options with no-action
         footstep_options_with_noop = torch.cat(
             [
                 footstep_options,
-                noop.unsqueeze(0).unsqueeze(0).expand(batch_size, -1, -1),
+                noop.unsqueeze(0).expand(batch_size, 1, -1),
             ],
             dim=1,
         )  # (batch, num_options + 1, 3)
-        # add the swing duration to the last dimension
-        swing_durations = swing_durations.unsqueeze(-1)  # (batch, num_options + 1, 1)
-        footstep_options_with_noop = torch.cat(
-            [footstep_options_with_noop, swing_durations], dim=-1
+
+        # Add swing durations as the 4th dimension
+        swing_durations_expanded = swing_durations.unsqueeze(
+            -1
+        )  # (batch, num_options + 1, 1)
+        actions_with_durations = torch.cat(
+            [footstep_options_with_noop, swing_durations_expanded], dim=-1
         )  # (batch, num_options + 1, 4)
-        selected_options = footstep_options_with_noop[selected_indices]
-        return selected_options
+
+        # Select the actions based on selected indices
+        batch_indices = torch.arange(batch_size, device=device)
+        selected_actions = actions_with_durations[batch_indices, selected_indices]
+
+        return selected_actions
 
     def evaluate(self, critic_observations: torch.Tensor, **kwargs) -> torch.Tensor:
         """

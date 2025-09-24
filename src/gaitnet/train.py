@@ -37,11 +37,10 @@ simulation_app = app_launcher.app
 
 import multiprocessing
 import signal
-from isaaclab.envs import ManagerBasedRLEnv
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper  # type: ignore
+from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # type: ignore
 from src.gaitnet.gaitnet import GaitNetActorCritic
-from rsl_rl.algorithms import PPO
-from rsl_rl.runners import OnPolicyRunner
+from rsl_rl.runners import on_policy_runner
+import rsl_rl.modules
 from src.gaitnet.env_cfg.gaitnet_env import get_env
 from src.util import log_exceptions
 from src import get_logger
@@ -69,64 +68,80 @@ signal.signal(signal.SIGINT, signal_handler)
 
 def main():
     env_cfg, env = get_env(
-        num_envs=args_cli.num_envs, 
-        device=args_cli.device, 
+        num_envs=args_cli.num_envs,
+        device=args_cli.device,
     )
 
     # wrap for RL training
     env = RslRlVecEnvWrapper(env)
 
     obs_space = env.observation_space["policy"].shape[1]
-    action_space = env.action_space.shape[1]
+    # action_space = env.action_space.shape[1]
     num_footstep_candidates = 5
-    # Create actor-critic network
-    actor_critic = GaitNetActorCritic(
-        robot_state_dim=obs_space,
-        num_footstep_options=num_footstep_candidates,
-        hidden_dims=[256, 256],
-    )
 
-    # Configure PPO
-    ppo_cfg = {
-        "value_loss_coef": 1.0,
-        "entropy_coef": 0.01,
-        "clip_param": 0.2,
-        "max_grad_norm": 1.0,
-        "num_learning_epochs": 5,
-        "num_mini_batches": 4,
-        "learning_rate": 3e-4,
-        "schedule": "adaptive",
-        "desired_kl": 0.01,
+    # hack to get OnPolicyRunner to be able to initiate a GaitNetActorCritic
+    on_policy_runner.__dict__["GaitNetActorCritic"] = GaitNetActorCritic  # type: ignore
+
+    # Prepare config dict for OnPolicyRunner
+    train_cfg = {
+        "algorithm": {
+            "class_name": "PPO",
+            "clip_param": 0.2,
+            "num_learning_epochs": 5,
+            "num_mini_batches": 4,
+            "value_loss_coef": 0.5,
+            "entropy_coef": 0.01,
+            "learning_rate": 1e-4,
+            "max_grad_norm": 1.0,
+            "use_clipped_value_loss": True,
+            "gamma": 0.99,
+            "lam": 0.95,
+        },
+        "policy": {
+            "class_name": "GaitNetActorCritic",
+            "robot_state_dim": obs_space,
+            "num_footstep_options": num_footstep_candidates,
+            "hidden_dims": [256, 256],
+        },
+        "save_dir": "./logs",
+        "experiment_name": "gaitnet",
+        "log_dir": "./logs",
+        "num_steps_per_env": 24,
+        "max_iterations": args_cli.max_iterations,
+        "save_interval": 100,
+        "empirical_normalization": False,
     }
 
-    # Create PPO algorithm
-    ppo = PPO(actor_critic, **ppo_cfg)
-
-    # Create runner
-    runner = OnPolicyRunner(
+    runner = on_policy_runner.OnPolicyRunner(
         env=env,
-        train_cfg={
-            "algorithm": ppo,
-            "policy": actor_critic,
-            "num_steps_per_env": 25,  # Roughly 10 second
-            "max_iterations": 10000,
-            "save_interval": 100,
-            "experiment_name": "footstep_selection",
-            "run_name": "value_based",
-        },
-        log_dir="./logs",
-        device="cuda",
+        train_cfg=train_cfg,
+        log_dir=train_cfg["log_dir"],
+        device=args_cli.device,
     )
-    runner.add_git_repo_to_log(__file__)
 
+    # Resume from checkpoint if specified
     if args_cli.resume is not None:
+        logger.info(f"Loading checkpoint from {args_cli.resume}")
         runner.load(args_cli.resume)
 
-    runner.learn(
-        num_learning_iterations=args_cli.max_iterations,
-        init_at_random_ep_len=True,
-    )
+    logger.info("Starting training...")
+    iteration = 0
+    while iteration < args_cli.max_iterations and not shutdown_requested:
+        runner.learn(num_learning_iterations=1)
+        iteration += 1
+        if iteration % train_cfg["save_interval"] == 0:
+            logger.info(f"Saving checkpoint at iteration {iteration}")
+            runner.save(f"./logs/checkpoint_{iteration}.pt")
 
+    # Final save at the end of training
+    if not shutdown_requested:
+        logger.info("Training completed successfully")
+        runner.save(f"./logs/checkpoint_{args_cli.max_iterations}.pt")
+    else:
+        logger.info("Training interrupted, saving checkpoint")
+        runner.save(f"./logs/checkpoint_{iteration}.pt")
+
+    logger.info("Closing environments")
     env.close()
 
 
