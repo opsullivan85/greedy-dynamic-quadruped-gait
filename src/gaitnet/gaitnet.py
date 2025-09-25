@@ -30,14 +30,24 @@ class FootstepOptionGenerator:
             torch.Tensor: Corresponding costs of shape (num_envs, num_options)
         """
         cost_maps = self.cost_map_generator.predict(obs)  # (num_envs, 4, H, W)
+
+        # remove options with invalid terrain
         valid_height_range = self.env.cfg.valid_height_range  # type: ignore
         terrain_mask = get_terrain_mask(valid_height_range, obs)  # (num_envs, 4, H, W)
-
-        # get the argmin of the cost maps where terrain is valid (1)
         masked_cost_maps = torch.where(
             terrain_mask, cost_maps, torch.tensor(float("inf"), device=cost_maps.device)
         )
 
+        # remove options for legs in swing state
+        # here 18:22 are the contact states for the 4 legs
+        contact_states = obs[:, 18:22].bool()  # (num_envs, 4)
+        swing_states = ~contact_states  # (num_envs, 4)
+        swing_states = swing_states.unsqueeze(-1).unsqueeze(-1)  # (num_envs, 4, 1, 1)
+        masked_cost_maps = torch.where(
+            swing_states, torch.tensor(float("inf"), device=cost_maps.device), masked_cost_maps
+        )
+
+        # get the best options
         flat_cost_map = masked_cost_maps.flatten()
         flat_cost_map = flat_cost_map.reshape(masked_cost_maps.shape[0], -1)  # (num_envs, 4*H*W)
         topk_values, topk_flat_indices = torch.topk(
