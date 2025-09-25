@@ -18,5 +18,5 @@ class RewardsCfg:
 
     yaw_tracking = RewTerm(func=mdp.track_ang_vel_z_exp, weight=0.4, params={
         "std": 2,
-        "command_name": "base_yaw",
+        "command_name": "base_velocity",
     })

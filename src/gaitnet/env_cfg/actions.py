@@ -10,14 +10,12 @@ class ActionsCfg:
 
     footstep_controller = FSCActionCfg(
         asset_name="robot",
-        robot_controllers=None,  # to be set later
     )
 
     # trick type hinting system into giving us better hints by faking type
     # note that the MPCControlActionCfg doesn't consume any actions, it just reads from commands
     mpc_controller: MPCControlActionCfg = HierarchicalActionCfg(  # type: ignore
         action_cfg=MPCControlActionCfg(
-            robot_controllers=None,  # to be set later
             command_name="base_velocity",
             asset_name="robot",
             joint_names=[".*"],  # all joints

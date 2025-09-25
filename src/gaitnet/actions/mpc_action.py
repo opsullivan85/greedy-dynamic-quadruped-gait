@@ -30,12 +30,8 @@ class MPCActionTerm(ActionTerm):
         super().__init__(cfg, env)
         # for type hinting
         self.cfg: "MPCActionCfg"
+        self.env_cfg = env.cfg  # type: ignore
         self._asset: Articulation  # type: ignore
-
-        # setup parallel robot controllers
-        if self.cfg.robot_controllers is None:
-            logger.warning("robot_controllers is None, must be set before stepping the env.")
-        self.robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.cfg.robot_controllers  # type: ignore
 
         # resolve the joints over which the action term is applied
         self._joint_ids, self._joint_names = self._asset.find_joints(
@@ -47,10 +43,6 @@ class MPCActionTerm(ActionTerm):
             (self.num_envs, self.action_dim), device=self.device
         )
         self._processed_actions = self._raw_actions
-
-    def __del__(self):
-        super().__del__()
-        del self.robot_controllers
 
     @property
     def action_dim(self) -> int:
@@ -84,9 +76,10 @@ class MPCActionTerm(ActionTerm):
             This is called at every simulation step by the manager.
         """
         processed_actions_cpu = self.processed_actions.cpu().numpy()
+        robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.env_cfg.robot_controllers  # type: ignore
         torques = controls_to_joint_efforts(
             scene=self._env.scene,
-            controllers=self.robot_controllers,
+            controllers=robot_controllers,
             controls=processed_actions_cpu,
             asset_name=self.cfg.asset_name,
         )
@@ -104,9 +97,10 @@ class MPCActionTerm(ActionTerm):
 
         self._raw_actions[env_ids] = 0.0
         self._processed_actions[env_ids] = 0.0
-        self.robot_controllers.call(
-            function = sim2real.Sim2RealInterface.reset,
-            mask = env_ids,  # type: ignore
+        robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.env_cfg.robot_controllers  # type: ignore
+        robot_controllers.call(
+            function=sim2real.Sim2RealInterface.reset,
+            mask=env_ids,  # type: ignore
         )
 
 
@@ -115,11 +109,6 @@ class MPCActionCfg(ActionTermCfg):
     """Configuration for the MPC Action Term"""
 
     class_type: type[ActionTerm] = MPCActionTerm
-
-    robot_controllers: VectorPool[sim2real.Sim2RealInterface] | None = None
-    """Pre-initialized robot controllers to use.
-    Needs to be set to non-None value before initializing the action term.
-    """
 
     joint_names: Sequence[str] = [".*"]
     """Regex patterns for the joint names to apply the action over.
@@ -183,11 +172,6 @@ class MPCControlActionCfg(ActionTermCfg):
 
     command_name: str = MISSING  # type: ignore
     """Name of the command to use as input."""
-
-    robot_controllers: VectorPool[sim2real.Sim2RealInterface] | None = None
-    """Pre-initialized robot controllers to use.
-    Needs to be set to non-None value before initializing the action term.
-    """
 
     joint_names: Sequence[str] = [".*"]
     """Regex patterns for the joint names to apply the action over.

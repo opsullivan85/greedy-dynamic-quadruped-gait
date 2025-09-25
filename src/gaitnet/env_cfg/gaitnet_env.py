@@ -94,8 +94,6 @@ def _update_controllers(
         debug_logging=False,
     )
     cfg.robot_controllers = controllers  # type: ignore
-    cfg.actions.footstep_controller.robot_controllers = controllers  # type: ignore
-    cfg.actions.mpc_controller.robot_controllers = controllers  # type: ignore
 
 
 def get_env(

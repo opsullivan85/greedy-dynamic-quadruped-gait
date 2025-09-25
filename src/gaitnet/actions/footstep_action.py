@@ -31,21 +31,13 @@ class FSCActionTerm(ActionTerm):
         super().__init__(cfg, env)
         # for type hinting
         self.cfg: "FSCActionCfg"
+        self.env_cfg = env.cfg
         self._asset: Articulation  # type: ignore
-
-        # setup parallel robot controllers
-        if self.cfg.robot_controllers is None:
-            logger.warning("robot_controllers is None, must be set before stepping the env.")
-        self.robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.cfg.robot_controllers  # type: ignore
 
         self._raw_actions = torch.zeros(
             (self.num_envs, self.action_dim), device=self.device
         )
         self._processed_actions = self._raw_actions
-
-    def __del__(self):
-        super().__del__()
-        del self.robot_controllers
 
     @property
     def action_dim(self) -> int:
@@ -100,7 +92,8 @@ class FSCActionTerm(ActionTerm):
         footstep_parameters = self.footstep_kwargs(processed_actions_cpu)
 
         # initiate the footsteps
-        self.robot_controllers.call(
+        robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.env_cfg.robot_controllers  # type: ignore
+        robot_controllers.call(
             function=sim2real.Sim2RealInterface.initiate_footstep,
             mask=mask,
             **footstep_parameters,
@@ -128,8 +121,3 @@ class FSCActionCfg(ActionTermCfg):
     """Configuration for the Footstep Controller (FSC) Action Term"""
 
     class_type: type[ActionTerm] = FSCActionTerm
-
-    robot_controllers: VectorPool[sim2real.Sim2RealInterface] | None = None
-    """Pre-initialized robot controllers to use.
-    Needs to be set to non-None value before initializing the action term.
-    """

@@ -300,12 +300,12 @@ class GaitNetActorCritic(ActorCritic):
         )
 
         # Cache for lazy evaluation
-        self._cached_observations = None
-        self._cached_footstep_options = None
-        self._cached_action_values = None
-        self._cached_swing_durations = None
-        self._cached_action_probs = None
-        self._cached_selected_indices = None
+        self._cached_observations: torch.Tensor = None  # type: ignore
+        self._cached_footstep_options: torch.Tensor = None  # type: ignore
+        self._cached_action_values: torch.Tensor = None  # type: ignore
+        self._cached_swing_durations: torch.Tensor = None  # type: ignore
+        self._cached_action_probs: torch.Tensor = None  # type: ignore
+        self._cached_selected_indices: torch.Tensor = None  # type: ignore
 
     def _ensure_forward_pass(self, observations: torch.Tensor):
         """
@@ -458,10 +458,10 @@ class GaitNetActorCritic(ActorCritic):
         """
         Reset the cached values. Called between episodes.
         """
-        self._cached_observations = None
-        self._cached_footstep_options = None  
-        self._cached_action_values = None
-        self._cached_swing_durations = None
-        self._cached_action_probs = None
-        self._cached_selected_indices = None
-        self.distribution = None
+        self._cached_observations = None  # type: ignore
+        self._cached_footstep_options = None  # type: ignore
+        self._cached_action_values = None  # type: ignore
+        self._cached_swing_durations = None  # type: ignore
+        self._cached_action_probs = None  # type: ignore
+        self._cached_selected_indices = None  # type: ignore
+        self.distribution = None  # type: ignore
