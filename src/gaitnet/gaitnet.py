@@ -427,23 +427,51 @@ class GaitNetActorCritic(ActorCritic):
     def action_mean(self):
         """
         Mean of the action distribution.
-        For categorical distribution, returns the probabilities.
+        For our value-based approach, return the expected action based on probabilities.
         """
         if self.distribution is None:
             raise RuntimeError("Distribution not initialized. Call update_distribution() first.")
-        return self.distribution.probs
+        
+        # Compute expected action as weighted sum of all options
+        batch_size = self._cached_footstep_options.shape[0]
+        
+        # Add swing durations as the 4th dimension
+        actions_with_durations = torch.cat(
+            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)], 
+            dim=-1
+        )  # (batch, num_options + 1, 4)
+        
+        # Compute weighted average using probabilities
+        probs = self.distribution.probs.unsqueeze(-1)  # (batch, num_options + 1, 1)
+        expected_action = (actions_with_durations * probs).sum(dim=1)  # (batch, 4)
+        
+        return expected_action
 
     @property 
     def action_std(self):
         """
         Standard deviation of the action distribution.
-        For categorical distribution, returns zeros (no meaningful std).
+        Compute std based on the variance of actions weighted by probabilities.
         """
         if self.distribution is None:
             raise RuntimeError("Distribution not initialized. Call update_distribution() first.")
-        # Categorical doesn't have std in the same sense as continuous distributions
-        # Return zeros with same shape as probs
-        return torch.zeros_like(self.distribution.probs)
+        
+        # Get expected action
+        mean_action = self.action_mean  # (batch, 4)
+        
+        # Add swing durations as the 4th dimension
+        actions_with_durations = torch.cat(
+            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)], 
+            dim=-1
+        )  # (batch, num_options + 1, 4)
+        
+        # Compute variance
+        probs = self.distribution.probs.unsqueeze(-1)  # (batch, num_options + 1, 1)
+        mean_expanded = mean_action.unsqueeze(1)  # (batch, 1, 4)
+        variance = (probs * (actions_with_durations - mean_expanded) ** 2).sum(dim=1)  # (batch, 4)
+        
+        # Return standard deviation
+        return torch.sqrt(variance + 1e-8)  # Add small epsilon for numerical stability
 
     @property
     def entropy(self):
