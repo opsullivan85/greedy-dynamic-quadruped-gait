@@ -153,13 +153,30 @@ class Gaitnet(nn.Module):
             durations: (batch_size, num_options + 1) swing durations for each option
                 no-action duration is 0
         """
-        footstep_options, footstep_costs = self.get_footstep_options(obs)
         robot_state = obs[:, : self.robot_state_dim]
         # (batch_size, num_options, 3)
         # [leg_idx, dx, dy]
         batch_size = robot_state.shape[0]
         device = robot_state.device
+        # add numeric representation for no-action to footstep options
+        no_action_option = torch.zeros((batch_size, 1, 3), device=device)
+        no_action_option[:, :, 0] = NO_STEP  # leg_idx = NO_STEP
 
+        # prepare footstep options
+        footstep_options, footstep_costs = self.get_footstep_options(obs)
+        # set invalid options to no-action
+        inf_cost_mask = torch.isinf(footstep_costs)  # (batch, num_options)
+        footstep_options[inf_cost_mask] = no_action_option.expand_as(footstep_options)[inf_cost_mask]
+        # add no-action option to the list
+        footstep_options = torch.cat(
+            [footstep_options, no_action_option],
+            dim=1,
+        )  # (batch, num_options + 1, 3)
+        footstep_costs = torch.cat(
+            [footstep_costs, torch.full((batch_size, 1), float('inf'), device=device)],
+            dim=1,
+        )  # (batch, num_options + 1)
+        
         # Encode robot state (shared for all options)
         robot_features = self.robot_state_encoder(
             robot_state
@@ -193,9 +210,10 @@ class Gaitnet(nn.Module):
             )  # (batch, 4+2+1)
 
             # Encode footstep
-            footstep_features = self.footstep_encoder(
-                footstep_input
-            )  # (batch, footstep_encoder_dim)
+            # default to no-action embedding, calculate embedding for valid options
+            non_inf_mask_i = ~inf_cost_mask[:, i]
+            footstep_features = self.no_action_embedding.unsqueeze(0).expand(batch_size, -1).clone()
+            footstep_features[non_inf_mask_i] = self.footstep_encoder(footstep_input[non_inf_mask_i])
 
             # Combine with robot state and compute outputs
             combined = torch.cat([robot_features, footstep_features], dim=-1)
@@ -212,28 +230,6 @@ class Gaitnet(nn.Module):
 
             option_values.append(value)
             option_durations.append(duration)
-
-        # Add no-action option
-        no_action_features = self.no_action_embedding.unsqueeze(0).expand(
-            batch_size, -1
-        )
-        no_action_combined = torch.cat([robot_features, no_action_features], dim=-1)
-        no_action_trunk = self.shared_trunk(no_action_combined)
-        no_action_value = self.value_head(no_action_trunk)
-        no_action_duration = torch.zeros_like(
-            no_action_value
-        )  # No duration for no-action
-
-        # add numeric representation for no-action to footstep options
-        no_action_option = torch.zeros((batch_size, 1, 3), device=device)
-        no_action_option[:, :, 0] = NO_STEP  # leg_idx = NO_STEP
-        footstep_options = torch.cat(
-            [footstep_options, no_action_option],
-            dim=1,
-        )  # (batch, num_options + 1, 3)
-
-        option_values.append(no_action_value)
-        option_durations.append(no_action_duration)
 
         # Stack all values and durations
         all_values = torch.cat(option_values, dim=-1)  # (batch, num_options + 1)
