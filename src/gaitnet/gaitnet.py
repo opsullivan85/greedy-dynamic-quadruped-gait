@@ -19,7 +19,7 @@ class FootstepOptionGenerator:
         self.num_options = num_options
         self.cost_map_generator = CostMapGenerator(device=env.device)
 
-    def get_footstep_options(self) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_footstep_options(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Generate footstep options based on the current environment state.
 
@@ -29,8 +29,9 @@ class FootstepOptionGenerator:
                           total shape is (num_options, 3)
             torch.Tensor: Corresponding costs of shape (num_envs, num_options)
         """
-        cost_maps = self.cost_map_generator.predict(self.env)  # (num_envs, 4, H, W)
-        terrain_mask = get_terrain_mask(self.env)  # (num_envs, 4, H, W)
+        cost_maps = self.cost_map_generator.predict(obs)  # (num_envs, 4, H, W)
+        valid_height_range = self.env.cfg.valid_height_range  # type: ignore
+        terrain_mask = get_terrain_mask(valid_height_range, obs)  # (num_envs, 4, H, W)
 
         # get the argmin of the cost maps where terrain is valid (1)
         masked_cost_maps = torch.where(
@@ -64,7 +65,7 @@ class Gaitnet(nn.Module):
 
     def __init__(
         self,
-        get_footstep_options: Callable[..., tuple[torch.Tensor, torch.Tensor]],
+        get_footstep_options: Callable[[torch.Tensor,], tuple[torch.Tensor, torch.Tensor]],
         robot_state_dim: int = 22,
         shared_encoder_dim: int = 128,
         footstep_encoder_dim: int = 64,
@@ -73,6 +74,8 @@ class Gaitnet(nn.Module):
         super().__init__()
 
         self.get_footstep_options = get_footstep_options
+
+        self.robot_state_dim = robot_state_dim
 
         # Shared encoder for robot state
         self.robot_state_encoder = nn.Sequential(
@@ -125,13 +128,13 @@ class Gaitnet(nn.Module):
 
     def forward(
         self,
-        robot_state: torch.Tensor,
+        obs: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass to compute values and swing durations for all footstep options.
 
         Args:
-            robot_state: (batch_size, 22) robot state information
+            obs: (batch_size, 122) robot state information
 
         Returns:
             footstep_options: (batch_size, num_options + 1, 3), including no-action option: [NO_STEP, 0, 0, 0]
@@ -140,7 +143,8 @@ class Gaitnet(nn.Module):
             durations: (batch_size, num_options + 1) swing durations for each option
                 no-action duration is 0
         """
-        footstep_options, footstep_costs = self.get_footstep_options()
+        footstep_options, footstep_costs = self.get_footstep_options(obs)
+        robot_state = obs[:, : self.robot_state_dim]
         # (batch_size, num_options, 3)
         # [leg_idx, dx, dy]
         batch_size = robot_state.shape[0]

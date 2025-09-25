@@ -108,18 +108,6 @@ class ObservationsCfg:
             func=contact_state,
             params={"sensor_cfg": SceneEntityCfg("contact_forces")},
         )
-
-        def __post_init__(self):
-            self.enable_corruption = False
-            # self.concatenate_terms = False
-
-    # observation groups
-    policy: PolicyCfg = PolicyCfg()
-
-    @configclass
-    class TerrainCfg(ObsGroup):
-        """Observations for terrain group."""
-
         FR_foot_scanner = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("FR_foot_scanner")},
@@ -137,23 +125,27 @@ class ObservationsCfg:
             params={"sensor_cfg": SceneEntityCfg("RR_foot_scanner")},
         )
 
-    terrain: TerrainCfg = TerrainCfg()
+        def __post_init__(self):
+            self.enable_corruption = False
+            # self.concatenate_terms = False
+
+    # observation groups
+    policy: PolicyCfg = PolicyCfg()
 
 
-def get_terrain_mask(env: ManagerBasedEnv) -> torch.Tensor:
+def get_terrain_mask(valid_height_range: tuple[float, float], obs: torch.Tensor) -> torch.Tensor:
     """Get a mask for the terrain observations.
     
     0 indicates invalid terrain (too high or too low)
     1 indicates valid terrain
     """
-    obs = env.observation_manager.compute()  # type: ignore
-    terrain_obs: torch.Tensor = obs["terrain"]  # type: ignore
+    terrain_terms = fs.grid_size[0] * fs.grid_size[1] * 4
+    terrain_obs = obs[:, -terrain_terms :]
     # reshape to (N, 4, H, W)
     terrain_obs = terrain_obs.reshape(
         terrain_obs.shape[0], 4, fs.grid_size[0], fs.grid_size[1]
     )
     # mask out values outside of allowed height range
-    # TODO: where do I store this? Can I put in the obsconfig?
-    max_height, min_height = env.cfg.valid_height_range  # type: ignore
+    max_height, min_height = valid_height_range
     terrain_mask = (terrain_obs > min_height) & (terrain_obs < max_height)
     return terrain_mask

@@ -504,7 +504,7 @@ class CostMapGenerator:
         if eval:
             self.model.eval()
 
-    def predict(self, env: ManagerBasedRLEnv) -> torch.Tensor:
+    def predict(self, obs: torch.Tensor) -> torch.Tensor:
         """Predict footstep cost maps from the current environment state.
 
         Args:
@@ -513,11 +513,8 @@ class CostMapGenerator:
         Returns:
             torch.Tensor: Predicted cost maps of shape (num_envs, 4, 5, 5)
         """
-        # get obs
-        obs = env.observation_manager.compute()  # type: ignore
         # assume the first 18 elements of obs are the same as flatten_state
-        policy: torch.Tensor = obs["policy"]  # type: ignore
-        x = policy[:, :18]
+        x = obs[:, :18]
 
         costmaps = self.model(x).reshape(-1, 4, fs.grid_size[0], fs.grid_size[1])
 
