@@ -8,10 +8,12 @@ import numpy as np
 from pathlib import Path
 from typing import List, Tuple
 from datetime import datetime
+from isaaclab.envs import ManagerBasedRLEnv
 from src.contactnet.tree import IsaacStateCPU, StepNode
 from src import PROJECT_ROOT
-from src.contactnet.util import get_dataset_paths
+from src.contactnet.util import get_checkpoint_path, get_dataset_paths
 from src import get_logger
+import src.simulation.cfg.footstep_scanner_constants as fs
 
 logger = get_logger()
 
@@ -488,8 +490,39 @@ def main():
     trainer.train(num_epochs=200)
 
 
-class ContactNetEvaluator:
-    ...
+class CostMapGenerator:
+    def __init__(self, device: str, eval: bool = True) -> None:
+        # Load model
+        dataset = FootstepDataset(get_dataset_paths())
+        self.model = ContactNet(
+            input_dim=dataset.input_dim, output_dim_per_foot=dataset.output_dim
+        )
+        del dataset
+        checkpoint = torch.load(get_checkpoint_path(), map_location=device)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.model.to(device)
+        if eval:
+            self.model.eval()
+
+    def predict(self, env: ManagerBasedRLEnv) -> torch.Tensor:
+        """Predict footstep cost maps from the current environment state.
+
+        Args:
+            env (ManagerBasedRLEnv): The environment containing the robot state.
+        
+        Returns:
+            torch.Tensor: Predicted cost maps of shape (num_envs, 4, 5, 5)
+        """
+        # get obs
+        obs = env.observation_manager.compute()  # type: ignore
+        # assume the first 18 elements of obs are the same as flatten_state
+        policy: torch.Tensor = obs["policy"]  # type: ignore
+        x = policy[:, :18]
+
+        costmaps = self.model(x).reshape(-1, 4, fs.grid_size[0], fs.grid_size[1])
+
+        return costmaps
+
 
 
 

@@ -3,10 +3,56 @@ from rsl_rl.modules import ActorCritic
 import torch
 import torch.nn as nn
 
+from isaaclab.envs import ManagerBasedRLEnv
 from src.gaitnet.actions.footstep_action import NO_STEP
 from src import get_logger
+from src.contactnet.contactnet import CostMapGenerator
+from src.gaitnet.env_cfg.observations import get_terrain_mask
+from src.simulation.cfg.footstep_scanner_constants import idx_to_xy
 
 logger = get_logger()
+
+
+class FootstepOptionGenerator:
+    def __init__(self, env: ManagerBasedRLEnv, num_options: int = 5):
+        self.env = env
+        self.num_options = num_options
+        self.cost_map_generator = CostMapGenerator(device=env.device)
+
+    def get_footstep_options(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Generate footstep options based on the current environment state.
+
+        Returns:
+            torch.Tensor: Footstep options of shape (num_envs, num_options, 3)
+                          Each option is represented as (leg_index, x_offset, y_offset)
+                          total shape is (num_options, 3)
+            torch.Tensor: Corresponding costs of shape (num_envs, num_options)
+        """
+        cost_maps = self.cost_map_generator.predict(self.env)  # (num_envs, 4, H, W)
+        terrain_mask = get_terrain_mask(self.env)  # (num_envs, 4, H, W)
+
+        # get the argmin of the cost maps where terrain is valid (1)
+        masked_cost_maps = torch.where(
+            terrain_mask, cost_maps, torch.tensor(float("inf"), device=cost_maps.device)
+        )
+
+        flat_cost_map = masked_cost_maps.flatten()
+        topk_values, topk_flat_indices = torch.topk(
+            flat_cost_map, self.num_options, largest=False, sorted=False
+        )  # (num_envs, num_options)
+
+        # unravel indices to (leg, idx, idy)
+        topk_indices = torch.unravel_index(
+            topk_flat_indices, masked_cost_maps.shape[1:]
+        )
+        # to (num_envs, num_options, 3)
+        topk_indices = torch.stack(topk_indices, dim=-1).permute(1, 0, 2)
+
+        # convert to (leg, x, y) to (leg, dx, dy)
+        topk_pos = idx_to_xy(topk_indices)  # (num_envs, num_options, 3)
+
+        return topk_pos, topk_values
 
 
 class Gaitnet(nn.Module):
@@ -17,7 +63,7 @@ class Gaitnet(nn.Module):
 
     def __init__(
         self,
-        get_footstep_options: Callable[..., torch.Tensor],
+        get_footstep_options: Callable[..., tuple[torch.Tensor, torch.Tensor]],
         robot_state_dim: int = 22,
         shared_encoder_dim: int = 128,
         footstep_encoder_dim: int = 64,
@@ -38,9 +84,11 @@ class Gaitnet(nn.Module):
         )
 
         # Footstep option encoder (processes each option)
-        # Input: [leg_idx_one_hot(4), x_offset, y_offset]
+        # Input: [leg_idx_one_hot(4), x_offset, y_offset, cost]
         self.footstep_encoder = nn.Sequential(
-            nn.Linear(4 + 2, footstep_encoder_dim),  # 4 for one-hot leg, 2 for x,y
+            nn.Linear(
+                4 + 2 + 1, footstep_encoder_dim
+            ),  # 4 for one-hot leg, 2 for x,y, 1 for cost
             nn.LayerNorm(footstep_encoder_dim),
             nn.ReLU(),
             nn.Linear(footstep_encoder_dim, footstep_encoder_dim),
@@ -83,16 +131,13 @@ class Gaitnet(nn.Module):
 
         Args:
             robot_state: (batch_size, 22) robot state information
-            footstep_options: (batch_size, num_options, 3) footstep options
-                             [leg_idx, dx, dy]
-            num_options: number of footstep options
 
         Returns:
             footstep_options: (batch_size, num_options + 1, 3), including no-action option: [NO_STEP, 0, 0, 0]
             values: (batch_size, num_options + 1) values for each option + no-action
             durations: (batch_size, num_options + 1) swing durations for each option
         """
-        footstep_options = self.get_footstep_options()
+        footstep_options, footstep_costs = self.get_footstep_options()
         # (batch_size, num_options, 3)
         # [leg_idx, dx, dy]
         batch_size = robot_state.shape[0]
@@ -122,10 +167,13 @@ class Gaitnet(nn.Module):
             dx = option[:, 1]  # (batch,)
             dy = option[:, 2]  # (batch,)
 
+            cost = footstep_costs[:, i]  # (batch,)
+
             # Combine footstep features
             footstep_input = torch.cat(
-                [leg_one_hot, dx.unsqueeze(-1), dy.unsqueeze(-1)], dim=-1
-            )  # (batch, 4+1+1)
+                [leg_one_hot, dx.unsqueeze(-1), dy.unsqueeze(-1), cost.unsqueeze(-1)],
+                dim=-1,
+            )  # (batch, 4+2+1)
 
             # Encode footstep
             footstep_features = self.footstep_encoder(

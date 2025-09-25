@@ -12,6 +12,7 @@ from isaaclab.envs.utils.io_descriptors import (
     record_dtype,
     record_shape,
 )
+import src.simulation.cfg.footstep_scanner_constants as fs
 
 
 @generic_io_descriptor(
@@ -137,3 +138,21 @@ class ObservationsCfg:
         )
 
     terrain: TerrainCfg = TerrainCfg()
+
+
+def get_terrain_mask(env: ManagerBasedEnv) -> torch.Tensor:
+    """Get a mask for the terrain observations.
+    
+    0 indicates invalid terrain (too high or too low)
+    1 indicates valid terrain
+    """
+    obs = env.observation_manager.compute()  # type: ignore
+    terrain_obs: torch.Tensor = obs["terrain"]  # type: ignore
+    # reshape to (N, 4, H, W)
+    terrain_obs = terrain_obs.reshape(
+        terrain_obs.shape[0], 4, fs.grid_size[0], fs.grid_size[1]
+    )
+    # mask out values outside of allowed height range
+    # TODO: where do I store this? Can I put in the obsconfig?
+    terrain_mask = (terrain_obs > terrain_obs.min_height) & (terrain_obs < terrain_obs.max_height)
+    return terrain_mask
