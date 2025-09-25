@@ -144,10 +144,21 @@ class MPCControlActionTerm(MPCActionTerm):
         self.cfg: "MPCControlActionCfg"  # type: ignore
         self._env: ManagerBasedRLEnv  # type: ignore
 
+        # override action dimensions
+        self._raw_actions = torch.zeros(
+            (self.num_envs, self.control_dim), device=self.device
+        )
+        self._processed_actions = self._raw_actions
+
     @property
     def action_dim(self) -> int:
         """Dimension of the action term."""
         return 0
+    
+    @property
+    def control_dim(self) -> int:
+        """Dimension of the control input."""
+        return 3  # 3D velocity command: vx, vy, wz
 
     def process_actions(self, actions: torch.Tensor):
         """Processes the actions sent to the environment.

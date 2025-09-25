@@ -299,35 +299,74 @@ class GaitNetActorCritic(ActorCritic):
             nn.Linear(hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0], 1),
         )
 
+        # Cache for lazy evaluation
+        self._cached_observations = None
+        self._cached_footstep_options = None
+        self._cached_action_values = None
+        self._cached_swing_durations = None
+        self._cached_action_probs = None
+        self._cached_selected_indices = None
+
+    def _ensure_forward_pass(self, observations: torch.Tensor):
+        """
+        Ensure forward pass has been computed for given observations.
+        Uses caching to avoid redundant computation.
+        """
+        # Check if we need to compute or observations have changed
+        if (self._cached_observations is None or 
+            not torch.equal(self._cached_observations, observations)):
+            
+            # Perform forward pass
+            footstep_options, action_values, swing_durations = self.actor(observations)
+            
+            # Convert to probabilities with softmax
+            action_probs = nn.functional.softmax(action_values, dim=-1)
+            
+            # Cache results
+            self._cached_observations = observations.clone()
+            self._cached_footstep_options = footstep_options
+            self._cached_action_values = action_values
+            self._cached_swing_durations = swing_durations
+            self._cached_action_probs = action_probs
+
+    def update_distribution(self, observations: torch.Tensor):
+        """
+        Update the action distribution based on current observations.
+        Uses lazy evaluation - actual computation happens on first access.
+        """
+        # Ensure forward pass is computed
+        self._ensure_forward_pass(observations)
+        
+        # Create categorical distribution from cached probabilities
+        self.distribution = torch.distributions.Categorical(self._cached_action_probs)
+
     def act(self, observations: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Select action based on current observations.
 
         Args:
-            observations: (batch, num_obs) tensor of observations
+            observations: (batch, num_obs) tensor of observations (robot state)
 
         Returns:
             actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
                     For no-action: [NO_STEP, 0, 0, 0]
         """
+        # Ensure distribution is updated
         self.update_distribution(observations)
-
-        # Get values and durations for all options
-        footstep_options, action_values, swing_durations = self.actor(observations)
-
-        # Convert to probabilities with softmax
-        action_probs = nn.functional.softmax(action_values, dim=-1)
 
         # Sample action index (or take argmax if deterministic)
         if kwargs.get("deterministic", False):
-            selected_indices = torch.argmax(action_probs, dim=-1)
+            selected_indices = torch.argmax(self._cached_action_probs, dim=-1)
         else:
-            dist = torch.distributions.Categorical(action_probs)
-            selected_indices = dist.sample()
+            selected_indices = self.distribution.sample()
+
+        # Cache the selected indices for get_actions_log_prob
+        self._cached_selected_indices = selected_indices
 
         # Add swing durations as the 4th dimension
         actions_with_durations = torch.cat(
-            [footstep_options, swing_durations.unsqueeze(-1)], dim=-1
+            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)], 
+            dim=-1
         )  # (batch, num_options + 1, 4)
 
         # Select the actions based on selected indices
@@ -336,3 +375,93 @@ class GaitNetActorCritic(ActorCritic):
         selected_actions = actions_with_durations[batch_indices, selected_indices]
 
         return selected_actions
+
+    def act_inference(self, observations: torch.Tensor) -> torch.Tensor:
+        """
+        Deterministic action selection for inference/evaluation.
+        
+        Args:
+            observations: (batch, num_obs) tensor of observations
+            
+        Returns:
+            actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
+        """
+        actions = self.act(observations, deterministic=True)
+        return actions
+
+    def get_actions_log_prob(self, actions: torch.Tensor) -> torch.Tensor:
+        """
+        Compute log probabilities of given actions.
+        
+        Args:
+            actions: (batch, 4) tensor of actions [leg_idx, dx, dy, swing_duration]
+        
+        Returns:
+            log_probs: (batch,) tensor of log probabilities
+        """
+        if self._cached_selected_indices is not None:
+            # Use cached indices from the last act() call (most common case)
+            return self.distribution.log_prob(self._cached_selected_indices)
+        else:
+            # Fallback: infer indices from actions (less reliable due to floating point precision)
+            batch_size = actions.shape[0]
+            device = actions.device
+            
+            # Add swing durations to cached footstep options for comparison
+            actions_with_durations = torch.cat(
+                [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)], 
+                dim=-1
+            )  # (batch, num_options + 1, 4)
+            
+            # Find which option matches each action
+            inferred_indices = torch.zeros(batch_size, dtype=torch.long, device=device)
+            
+            for b in range(batch_size):
+                # Compare actions with all options for this batch element
+                differences = torch.abs(actions_with_durations[b] - actions[b]).sum(dim=-1)
+                inferred_indices[b] = torch.argmin(differences)
+            
+            return self.distribution.log_prob(inferred_indices)
+
+    @property
+    def action_mean(self):
+        """
+        Mean of the action distribution.
+        For categorical distribution, returns the probabilities.
+        """
+        if self.distribution is None:
+            raise RuntimeError("Distribution not initialized. Call update_distribution() first.")
+        return self.distribution.probs
+
+    @property 
+    def action_std(self):
+        """
+        Standard deviation of the action distribution.
+        For categorical distribution, returns zeros (no meaningful std).
+        """
+        if self.distribution is None:
+            raise RuntimeError("Distribution not initialized. Call update_distribution() first.")
+        # Categorical doesn't have std in the same sense as continuous distributions
+        # Return zeros with same shape as probs
+        return torch.zeros_like(self.distribution.probs)
+
+    @property
+    def entropy(self):
+        """
+        Entropy of the action distribution.
+        """
+        if self.distribution is None:
+            raise RuntimeError("Distribution not initialized. Call update_distribution() first.")
+        return self.distribution.entropy()
+
+    def reset(self, dones=None):
+        """
+        Reset the cached values. Called between episodes.
+        """
+        self._cached_observations = None
+        self._cached_footstep_options = None  
+        self._cached_action_values = None
+        self._cached_swing_durations = None
+        self._cached_action_probs = None
+        self._cached_selected_indices = None
+        self.distribution = None
