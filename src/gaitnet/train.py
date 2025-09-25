@@ -41,7 +41,7 @@ simulation_app = app_launcher.app
 import multiprocessing
 import signal
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # type: ignore
-from src.gaitnet.gaitnet import GaitNetActorCritic
+from src.gaitnet.gaitnet import GaitNetActorCritic, FootstepOptionGenerator
 from rsl_rl.runners import on_policy_runner
 import rsl_rl.modules
 from src.gaitnet.env_cfg.gaitnet_env import get_env
@@ -82,19 +82,10 @@ def main():
     # action_space = env.action_space.shape[1]
     num_footstep_candidates = 5
 
-    def get_footstep_options_from_env(env):
-        return torch.tensor(
-            (
-                (0, 0, 0),
-                (1, 0, 0),
-                (2, 0, 0),
-                (3, 0, 0),
-                (0, 2, 2),
-            ),
-            device=args_cli.device, dtype=torch.int
-        )
-    get_footstep_options = lambda: get_footstep_options_from_env(env)
-
+    footstep_option_generator = FootstepOptionGenerator(
+        env=env.unwrapped,
+        num_options=num_footstep_candidates,
+    )
 
     # hack to get OnPolicyRunner to be able to initiate a GaitNetActorCritic
     on_policy_runner.__dict__["GaitNetActorCritic"] = GaitNetActorCritic  # type: ignore
@@ -119,7 +110,7 @@ def main():
             "robot_state_dim": obs_space,
             "num_footstep_options": num_footstep_candidates,
             "hidden_dims": [256, 256],
-            "get_footstep_options": get_footstep_options,
+            "get_footstep_options": footstep_option_generator.get_footstep_options,
         },
         "save_dir": "./logs",
         "experiment_name": "gaitnet",
