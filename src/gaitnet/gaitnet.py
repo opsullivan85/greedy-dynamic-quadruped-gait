@@ -1,3 +1,4 @@
+from typing import Callable
 from rsl_rl.modules import ActorCritic
 import torch
 import torch.nn as nn
@@ -16,12 +17,15 @@ class Gaitnet(nn.Module):
 
     def __init__(
         self,
+        get_footstep_options: Callable[..., torch.Tensor],
         robot_state_dim: int = 22,
         shared_encoder_dim: int = 128,
         footstep_encoder_dim: int = 64,
         hidden_dim: int = 256,
     ):
         super().__init__()
+
+        self.get_footstep_options = get_footstep_options
 
         # Shared encoder for robot state
         self.robot_state_encoder = nn.Sequential(
@@ -73,8 +77,7 @@ class Gaitnet(nn.Module):
     def forward(
         self,
         robot_state: torch.Tensor,
-        footstep_options: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass to compute values and swing durations for all footstep options.
 
@@ -85,9 +88,13 @@ class Gaitnet(nn.Module):
             num_options: number of footstep options
 
         Returns:
+            footstep_options: (batch_size, num_options + 1, 3), including no-action option: [NO_STEP, 0, 0, 0]
             values: (batch_size, num_options + 1) values for each option + no-action
             durations: (batch_size, num_options + 1) swing durations for each option
         """
+        footstep_options = self.get_footstep_options()
+        # (batch_size, num_options, 3)
+        # [leg_idx, dx, dy]
         batch_size = robot_state.shape[0]
         device = robot_state.device
 
@@ -152,6 +159,14 @@ class Gaitnet(nn.Module):
             no_action_value
         )  # No duration for no-action
 
+        # add numeric representation for no-action to footstep options
+        no_action_option = torch.zeros((batch_size, 1, 3), device=device)
+        no_action_option[:, 0] = NO_STEP  # leg_idx = NO_STEP
+        footstep_options = torch.cat(
+            [footstep_options, no_action_option],
+            dim=1,
+        )  # (batch, num_options + 1, 3)
+
         option_values.append(no_action_value)
         option_durations.append(no_action_duration)
 
@@ -159,7 +174,7 @@ class Gaitnet(nn.Module):
         all_values = torch.cat(option_values, dim=-1)  # (batch, num_options + 1)
         all_durations = torch.cat(option_durations, dim=-1)  # (batch, num_options + 1)
 
-        return all_values, all_durations
+        return footstep_options, all_values, all_durations
 
 
 class GaitNetActorCritic(ActorCritic):
@@ -170,9 +185,10 @@ class GaitNetActorCritic(ActorCritic):
 
     def __init__(
         self,
-        num_actor_obs=None,
-        num_critic_obs=None,
-        num_actions=None,
+        num_actor_obs,
+        num_critic_obs,
+        num_actions,
+        get_footstep_options: Callable[..., torch.Tensor],
         robot_state_dim=22,
         num_footstep_options=5,
         hidden_dims=[256, 256],
@@ -191,14 +207,10 @@ class GaitNetActorCritic(ActorCritic):
         self.robot_state_dim = robot_state_dim
         self.num_footstep_options = num_footstep_options
         self.hidden_dims = hidden_dims
+        self.num_actions = num_actions
 
-        # Calculate observation and action dimensions for parent class
-        num_obs = robot_state_dim + (num_footstep_options * 3)
-        num_actions = 4
-
-        # Use provided or calculated values
-        num_actor_obs = num_actor_obs if num_actor_obs is not None else num_obs
-        num_critic_obs = num_critic_obs if num_critic_obs is not None else num_obs
+        # Distribution for RL compatibility
+        self.distribution: torch.distributions.Categorical = None  # type: ignore
 
         # Call parent constructor
         super().__init__(
@@ -215,6 +227,7 @@ class GaitNetActorCritic(ActorCritic):
 
         # Override the actor with our custom value-based network
         self.actor = Gaitnet(
+            get_footstep_options=get_footstep_options,
             robot_state_dim=self.robot_state_dim,
             shared_encoder_dim=hidden_dims[0] // 2,
             footstep_encoder_dim=hidden_dims[0] // 4,
@@ -235,18 +248,12 @@ class GaitNetActorCritic(ActorCritic):
             nn.Linear(hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0], 1),
         )
 
-        self.num_obs = num_obs
-        self.num_actions = num_actions
-
-        # Distribution for RL compatibility
-        self.distribution: torch.distributions.Categorical = None  # type: ignore
-
     def update_distribution(self, observations):
         """
         Update the action distribution for RL sampling.
         """
-        robot_state = observations[:, :self.robot_state_dim]
-        footstep_options_flat = observations[:, self.robot_state_dim:]
+        robot_state = observations[:, : self.robot_state_dim]
+        footstep_options_flat = observations[:, self.robot_state_dim :]
         batch_size = observations.shape[0]
         footstep_options = footstep_options_flat.reshape(
             batch_size, self.num_footstep_options, 3
@@ -266,7 +273,11 @@ class GaitNetActorCritic(ActorCritic):
         batch_size = actions.shape[0]
         indices = actions[:, 0].long()
         # If leg_idx == NO_STEP, set to last index
-        indices = torch.where(indices == NO_STEP, torch.tensor(self.num_footstep_options, device=actions.device), indices)
+        indices = torch.where(
+            indices == NO_STEP,
+            torch.tensor(self.num_footstep_options, device=actions.device),
+            indices,
+        )
         # Get log prob from distribution
         log_probs = self.distribution.log_prob(indices)
         return log_probs
@@ -304,18 +315,8 @@ class GaitNetActorCritic(ActorCritic):
             actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
                     For no-action: [NO_STEP, 0, 0, 0]
         """
-        # Parse observations
-        robot_state = observations[:, : self.robot_state_dim]
-        footstep_options_flat = observations[:, self.robot_state_dim :]
-
-        # Reshape footstep options
-        batch_size = observations.shape[0]
-        footstep_options = footstep_options_flat.reshape(
-            batch_size, self.num_footstep_options, 3
-        )
-
         # Get values and durations for all options
-        action_values, swing_durations = self.actor(robot_state, footstep_options)
+        footstep_options, action_values, swing_durations = self.actor(observations)
 
         # Convert to probabilities with softmax
         action_probs = nn.functional.softmax(action_values, dim=-1)
@@ -327,31 +328,17 @@ class GaitNetActorCritic(ActorCritic):
             dist = torch.distributions.Categorical(action_probs)
             selected_indices = dist.sample()
 
-        # Now convert selected indices to actual action parameters
-        # Create no-action option
-        batch_size = observations.shape[0]
-        device = observations.device
-        noop = torch.tensor([NO_STEP, 0.0, 0.0], device=device)
-
-        # Combine footstep options with no-action
-        footstep_options_with_noop = torch.cat(
-            [
-                footstep_options,
-                noop.unsqueeze(0).expand(batch_size, 1, -1),
-            ],
-            dim=1,
-        )  # (batch, num_options + 1, 3)
-
         # Add swing durations as the 4th dimension
         swing_durations_expanded = swing_durations.unsqueeze(
             -1
         )  # (batch, num_options + 1, 1)
         actions_with_durations = torch.cat(
-            [footstep_options_with_noop, swing_durations_expanded], dim=-1
+            [footstep_options, swing_durations_expanded], dim=-1
         )  # (batch, num_options + 1, 4)
 
         # Select the actions based on selected indices
-        batch_indices = torch.arange(batch_size, device=device)
+        batch_size = observations.shape[0]
+        batch_indices = torch.arange(batch_size, device=observations.device)
         selected_actions = actions_with_durations[batch_indices, selected_indices]
 
         return selected_actions

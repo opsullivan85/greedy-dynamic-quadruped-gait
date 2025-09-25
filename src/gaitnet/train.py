@@ -1,5 +1,8 @@
+import torch
 from isaaclab.app import AppLauncher
 import argparse
+
+from src.simulation.cfg import terrain
 
 # add argparse arguments
 parser = argparse.ArgumentParser(
@@ -79,6 +82,20 @@ def main():
     # action_space = env.action_space.shape[1]
     num_footstep_candidates = 5
 
+    def get_footstep_options_from_env(env):
+        return torch.tensor(
+            (
+                (0, 0, 0),
+                (1, 0, 0),
+                (2, 0, 0),
+                (3, 0, 0),
+                (0, 2, 2),
+            ),
+            device=args_cli.device, dtype=torch.int
+        )
+    get_footstep_options = lambda: get_footstep_options_from_env(env)
+
+
     # hack to get OnPolicyRunner to be able to initiate a GaitNetActorCritic
     on_policy_runner.__dict__["GaitNetActorCritic"] = GaitNetActorCritic  # type: ignore
 
@@ -102,6 +119,7 @@ def main():
             "robot_state_dim": obs_space,
             "num_footstep_options": num_footstep_candidates,
             "hidden_dims": [256, 256],
+            "get_footstep_options": get_footstep_options,
         },
         "save_dir": "./logs",
         "experiment_name": "gaitnet",

@@ -16,7 +16,7 @@ from src import get_logger
 logger = get_logger()
 
 
-class QuadrupedDataset(Dataset):
+class FootstepDataset(Dataset):
     """
     Custom Dataset for quadruped locomotion data.
 
@@ -158,13 +158,13 @@ class QuadrupedDataset(Dataset):
         return torch.FloatTensor(state_flat), torch.FloatTensor(cost_map_flat)
 
 
-class FootModel(nn.Module):
+class FootstepModel(nn.Module):
     """
     Individual neural network model for a single foot.
     """
 
     def __init__(self, input_dim: int, output_dim: int, dropout_rate: float = 0.1):
-        super(FootModel, self).__init__()
+        super(FootstepModel, self).__init__()
 
         self.network = nn.Sequential(
             nn.Linear(input_dim, 64),
@@ -193,7 +193,7 @@ class FootModel(nn.Module):
         return self.network(x)
 
 
-class QuadrupedModel(nn.Module):
+class ContactNet(nn.Module):
     """
     Combined model containing 4 foot models in a 'black box' architecture.
 
@@ -202,12 +202,12 @@ class QuadrupedModel(nn.Module):
     """
 
     def __init__(self, input_dim: int, output_dim_per_foot: int):
-        super(QuadrupedModel, self).__init__()
+        super(ContactNet, self).__init__()
 
         # Create 4 separate models for each foot
         # This design allows for future mirror symmetry implementation
         self.foot_models = nn.ModuleList(
-            [FootModel(input_dim, output_dim_per_foot) for _ in range(4)]
+            [FootstepModel(input_dim, output_dim_per_foot) for _ in range(4)]
         )
 
         logger.info(f"created ContactNet model")
@@ -233,7 +233,7 @@ class QuadrupedModel(nn.Module):
         return torch.stack(outputs, dim=1)
 
 
-class QuadrupedTrainer:
+class ContactNetTrainer:
     """
     Training class that handles the complete training pipeline.
 
@@ -247,7 +247,7 @@ class QuadrupedTrainer:
 
     def __init__(
         self,
-        model: QuadrupedModel,
+        model: ContactNet,
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
         device: str = "cuda",
@@ -446,7 +446,7 @@ def main():
     logger.info(f"using device: {device}")
 
     # Load dataset
-    dataset = QuadrupedDataset(get_dataset_paths())
+    dataset = FootstepDataset(get_dataset_paths())
 
     # Split dataset (80% train, 20% validation)
     train_size = int(0.8 * len(dataset))
@@ -477,15 +477,20 @@ def main():
     logger.info(f"train samples: {len(train_dataset)}, val samples: {len(val_dataset)}")
 
     # Create model
-    model = QuadrupedModel(input_dim=dataset.input_dim, output_dim_per_foot=dataset.output_dim)
+    model = ContactNet(input_dim=dataset.input_dim, output_dim_per_foot=dataset.output_dim)
 
     # Create trainer and start training
-    trainer = QuadrupedTrainer(
+    trainer = ContactNetTrainer(
         model=model, train_loader=train_loader, val_loader=val_loader, device=device
     )
 
     # Train the model
     trainer.train(num_epochs=200)
+
+
+class ContactNetEvaluator:
+    ...
+
 
 
 if __name__ == "__main__":

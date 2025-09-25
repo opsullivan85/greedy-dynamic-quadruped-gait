@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from src.contactnet.train import QuadrupedDataset, QuadrupedModel
+from src.contactnet.contactnet import FootstepDataset, ContactNet
 from src.contactnet.debug import view_footstep_cost_map
 import argparse
 import time
@@ -33,7 +33,7 @@ args, unused_args = parser.parse_known_args()
 
 def compare_model_output(
     model: nn.Module,
-    dataset: QuadrupedDataset,
+    dataset: FootstepDataset,
     device: torch.device,
     num_samples: int = 5,
     random_samples: bool = True,
@@ -116,10 +116,10 @@ def benchmark_model_evaluation(
 def main():
 
     # Load dataset
-    dataset = QuadrupedDataset(get_dataset_paths())
+    dataset = FootstepDataset(get_dataset_paths())
 
     # Load model
-    model = QuadrupedModel(
+    model = ContactNet(
         input_dim=dataset.input_dim, output_dim_per_foot=dataset.output_dim
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

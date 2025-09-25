@@ -34,7 +34,7 @@ from isaaclab.envs import ManagerBasedEnv
 import src
 from src import control
 from src.contactnet.debug import view_footstep_cost_map
-from src.contactnet.train import QuadrupedDataset, QuadrupedModel
+from src.contactnet.contactnet import FootstepDataset, ContactNet
 from src.contactnet.util import get_checkpoint_path, get_dataset_paths
 from src import get_logger
 import pickle
@@ -117,8 +117,8 @@ def main():
 
 
     # Load model
-    dataset = QuadrupedDataset(get_dataset_paths())
-    model = QuadrupedModel(
+    dataset = FootstepDataset(get_dataset_paths())
+    model = ContactNet(
         input_dim=dataset.input_dim, output_dim_per_foot=dataset.output_dim
     )
     del dataset
@@ -155,7 +155,7 @@ def main():
                 continue
 
             # take footstep
-            x = QuadrupedDataset.flatten_state(done_state)
+            x = FootstepDataset.flatten_state(done_state)
             x = x.astype(np.float32)
             x = torch.from_numpy(x).unsqueeze(0).to(args.device)
             costmap = model(x).cpu().numpy().reshape(4, 5, 5)

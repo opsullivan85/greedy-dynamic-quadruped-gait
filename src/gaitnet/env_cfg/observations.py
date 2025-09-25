@@ -56,17 +56,13 @@ def foot_position_xy_b(
     observation_type="RootState",
     on_inspect=[record_shape, record_dtype],
 )
-def contact_state(
-    env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg
-) -> torch.Tensor:
-    """Get the contact state from a sensor.
-    """
+def contact_state(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Get the contact state from a sensor."""
     contact_forces = env.scene[sensor_cfg.name].data.net_forces_w
     contacts = (
         contact_forces.norm(dim=2) > env.scene["contact_forces"].cfg.force_threshold
     )
     return contacts
-
 
 
 @configclass
@@ -120,8 +116,8 @@ class ObservationsCfg:
     policy: PolicyCfg = PolicyCfg()
 
     @configclass
-    class PrivilegedCfg(ObsGroup):
-        """Observations for privileged group."""
+    class TerrainCfg(ObsGroup):
+        """Observations for terrain group."""
 
         FR_foot_scanner = ObsTerm(
             func=mdp.height_scan,
@@ -140,5 +136,4 @@ class ObservationsCfg:
             params={"sensor_cfg": SceneEntityCfg("RR_foot_scanner")},
         )
 
-
-    privileged: PrivilegedCfg = PrivilegedCfg()
+    terrain: TerrainCfg = TerrainCfg()

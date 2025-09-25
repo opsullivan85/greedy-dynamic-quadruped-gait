@@ -23,8 +23,8 @@ if __name__ == "__main__":
             datagen.main()
 
         elif used_args.train:
-            from src.contactnet import train
-            train.main()
+            from src.contactnet import contactnet
+            contactnet.main()
 
         elif used_args.evaluate:
             from src.contactnet import evaluate
