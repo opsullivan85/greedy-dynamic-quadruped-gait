@@ -154,5 +154,6 @@ def get_terrain_mask(env: ManagerBasedEnv) -> torch.Tensor:
     )
     # mask out values outside of allowed height range
     # TODO: where do I store this? Can I put in the obsconfig?
-    terrain_mask = (terrain_obs > terrain_obs.min_height) & (terrain_obs < terrain_obs.max_height)
+    max_height, min_height = env.cfg.valid_height_range  # type: ignore
+    terrain_mask = (terrain_obs > min_height) & (terrain_obs < max_height)
     return terrain_mask

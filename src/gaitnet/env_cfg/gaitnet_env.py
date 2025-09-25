@@ -43,6 +43,8 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
     """In order: FL, FR, RL, RR"""
     foot_indices = np.asarray([13, 14, 15, 16], dtype=np.int32)
 
+    valid_height_range = (0, -0.2)  # (max, min)
+
     def __post_init__(self):
         """Post initialization."""
         # general settings

@@ -38,6 +38,7 @@ class FootstepOptionGenerator:
         )
 
         flat_cost_map = masked_cost_maps.flatten()
+        flat_cost_map = flat_cost_map.reshape(masked_cost_maps.shape[0], -1)  # (num_envs, 4*H*W)
         topk_values, topk_flat_indices = torch.topk(
             flat_cost_map, self.num_options, largest=False, sorted=False
         )  # (num_envs, num_options)
@@ -47,7 +48,7 @@ class FootstepOptionGenerator:
             topk_flat_indices, masked_cost_maps.shape[1:]
         )
         # to (num_envs, num_options, 3)
-        topk_indices = torch.stack(topk_indices, dim=-1).permute(1, 0, 2)
+        topk_indices = torch.stack(topk_indices, dim=-1)
 
         # convert to (leg, x, y) to (leg, dx, dy)
         topk_pos = idx_to_xy(topk_indices)  # (num_envs, num_options, 3)
@@ -134,8 +135,10 @@ class Gaitnet(nn.Module):
 
         Returns:
             footstep_options: (batch_size, num_options + 1, 3), including no-action option: [NO_STEP, 0, 0, 0]
+                last idx is (leg, dx, dy)
             values: (batch_size, num_options + 1) values for each option + no-action
             durations: (batch_size, num_options + 1) swing durations for each option
+                no-action duration is 0
         """
         footstep_options, footstep_costs = self.get_footstep_options()
         # (batch_size, num_options, 3)
@@ -209,7 +212,7 @@ class Gaitnet(nn.Module):
 
         # add numeric representation for no-action to footstep options
         no_action_option = torch.zeros((batch_size, 1, 3), device=device)
-        no_action_option[:, 0] = NO_STEP  # leg_idx = NO_STEP
+        no_action_option[:, :, 0] = NO_STEP  # leg_idx = NO_STEP
         footstep_options = torch.cat(
             [footstep_options, no_action_option],
             dim=1,
@@ -236,7 +239,7 @@ class GaitNetActorCritic(ActorCritic):
         num_actor_obs,
         num_critic_obs,
         num_actions,
-        get_footstep_options: Callable[..., torch.Tensor],
+        get_footstep_options: Callable[..., tuple[torch.Tensor, torch.Tensor]],
         robot_state_dim=22,
         num_footstep_options=5,
         hidden_dims=[256, 256],
@@ -296,73 +299,19 @@ class GaitNetActorCritic(ActorCritic):
             nn.Linear(hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0], 1),
         )
 
-    def update_distribution(self, observations):
-        """
-        Update the action distribution for RL sampling.
-        """
-        robot_state = observations[:, : self.robot_state_dim]
-        footstep_options_flat = observations[:, self.robot_state_dim :]
-        batch_size = observations.shape[0]
-        footstep_options = footstep_options_flat.reshape(
-            batch_size, self.num_footstep_options, 3
-        )
-        action_values, _ = self.actor(robot_state, footstep_options)
-        action_probs = nn.functional.softmax(action_values, dim=-1)
-        self.distribution = torch.distributions.Categorical(action_probs)
-
-    def get_actions_log_prob(self, actions):
-        """
-        Get log probabilities of actions for RL training.
-        """
-        # actions: (batch, 4) [leg_idx, dx, dy, swing_duration]
-        # We map actions to their selected index (leg_idx, dx, dy, duration)
-        # For compatibility, assume leg_idx is the index (for discrete selection)
-        # If no-action, leg_idx == NO_STEP, which is last index
-        batch_size = actions.shape[0]
-        indices = actions[:, 0].long()
-        # If leg_idx == NO_STEP, set to last index
-        indices = torch.where(
-            indices == NO_STEP,
-            torch.tensor(self.num_footstep_options, device=actions.device),
-            indices,
-        )
-        # Get log prob from distribution
-        log_probs = self.distribution.log_prob(indices)
-        return log_probs
-
-    @property
-    def action_mean(self):
-        # Not meaningful for categorical, but required for compatibility
-        return torch.zeros(self.num_actions, device=next(self.parameters()).device)
-
-    @property
-    def action_std(self):
-        # Not meaningful for categorical, but required for compatibility
-        return torch.ones(self.num_actions, device=next(self.parameters()).device)
-
-    @property
-    def entropy(self):
-        return self.distribution.entropy()
-
-    def act_inference(self, observations):
-        """
-        Deterministic action selection for inference.
-        """
-        return self.act(observations, deterministic=True)
-
     def act(self, observations: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Select action based on current observations.
 
         Args:
             observations: (batch, num_obs) tensor of observations
-                [:, :robot_state_dim] - robot state
-                [:, robot_state_dim:] - footstep options (leg_idx, dx, dy)*num_options flattened
 
         Returns:
             actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
                     For no-action: [NO_STEP, 0, 0, 0]
         """
+        self.update_distribution(observations)
+
         # Get values and durations for all options
         footstep_options, action_values, swing_durations = self.actor(observations)
 
@@ -377,11 +326,8 @@ class GaitNetActorCritic(ActorCritic):
             selected_indices = dist.sample()
 
         # Add swing durations as the 4th dimension
-        swing_durations_expanded = swing_durations.unsqueeze(
-            -1
-        )  # (batch, num_options + 1, 1)
         actions_with_durations = torch.cat(
-            [footstep_options, swing_durations_expanded], dim=-1
+            [footstep_options, swing_durations.unsqueeze(-1)], dim=-1
         )  # (batch, num_options + 1, 4)
 
         # Select the actions based on selected indices
@@ -390,9 +336,3 @@ class GaitNetActorCritic(ActorCritic):
         selected_actions = actions_with_durations[batch_indices, selected_indices]
 
         return selected_actions
-
-    def evaluate(self, critic_observations: torch.Tensor, **kwargs) -> torch.Tensor:
-        """
-        Compute value estimate for observations.
-        """
-        return self.critic(critic_observations)

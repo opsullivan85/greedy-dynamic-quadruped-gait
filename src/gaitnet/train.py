@@ -1,8 +1,5 @@
-import torch
 from isaaclab.app import AppLauncher
 import argparse
-
-from src.simulation.cfg import terrain
 
 # add argparse arguments
 parser = argparse.ArgumentParser(
