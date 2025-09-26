@@ -67,8 +67,16 @@ class FSCActionTerm(ActionTerm):
         Returns:
             The kwargs for the footstep initiation call.
         """
+        # convert legs from [FL, FR, RL, RR] order to [FR, FL, RR, RL] order
+        # this is needed to match the order expected by the Sim2RealInterface
+        legs = processed_actions[:, 0].astype(np.int32)
+        legs_processed = np.copy(legs)
+        legs_processed[legs == 0] = 1  # FL -> FR
+        legs_processed[legs == 1] = 0  # FR -> FL
+        legs_processed[legs == 2] = 3  # RL -> RR
+        legs_processed[legs == 3] = 2  # RR -> RL
         return {
-            "leg": processed_actions[:, 0].astype(np.int32),
+            "leg": legs_processed,
             "location_hip": processed_actions[:, 1:3],
             "duration": processed_actions[:, 3],
         }
@@ -90,6 +98,9 @@ class FSCActionTerm(ActionTerm):
         # mask out invalid steps
         mask = processed_actions_cpu[:, 0] != NO_STEP
         footstep_parameters = self.footstep_kwargs(processed_actions_cpu)
+
+        act0 = actions[0]
+        logger.info(act0.cpu().numpy().tolist())
 
         # initiate the footsteps
         robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.env_cfg.robot_controllers  # type: ignore

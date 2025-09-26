@@ -89,7 +89,7 @@ def _update_controllers(
     controllers: VectorPool[sim2real.Sim2RealInterface] = VectorPool(
         instances=num_envs,
         cls=sim2real.SimInterface,
-        dt=cfg.decimation * cfg.sim.dt,  # 500 Hz leg PD control
+        dt=cfg.sim.dt,  # 250 Hz leg PD control
         iterations_between_mpc=5,  # 50 Hz MPC
         debug_logging=False,
     )
