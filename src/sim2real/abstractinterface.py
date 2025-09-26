@@ -68,7 +68,7 @@ class Sim2RealInterface(ABC):
 
         Returns:
             np.ndarray: (4,) boolean array indicating contact state of each foot
-                index 0: leg index (0-3)
+                index 0: leg index (0-3) in FR, FL, RR, RL order
                 True if in contact, False otherwise
         """
         pass
@@ -79,8 +79,19 @@ class Sim2RealInterface(ABC):
 
         Returns:
             np.ndarray: (4,) float32 array indicating swing phase of each leg
-                index 0: leg index (0-3)
+                index 0: leg index (0-3) in FR, FL, RR, RL order
                 value in [0, 1], where 0 is the start of swing and 1 is the end of swing
+        """
+        pass
+    
+    @abstractmethod
+    def get_swing_durations(self) -> NDArray[Shape["4, 1"], Float32]:
+        """Get the swing durations of each leg.
+
+        Returns:
+            np.ndarray: (4, 1) float32 array indicating swing duration of each leg
+                index 0: leg index (0-3) in FR, FL, RR, RL order
+                value in seconds
         """
         pass
 

@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from isaaclab.envs import mdp
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -13,6 +14,11 @@ from isaaclab.envs.utils.io_descriptors import (
     record_shape,
 )
 import src.simulation.cfg.footstep_scanner_constants as fs
+from src.util.vectorpool import VectorPool
+from src.sim2real.abstractinterface import Sim2RealInterface
+from src import get_logger
+
+logger = get_logger()
 
 
 @generic_io_descriptor(
@@ -57,13 +63,37 @@ def foot_position_xy_b(
     observation_type="RootState",
     on_inspect=[record_shape, record_dtype],
 )
-def contact_state(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+def contact_state_sensors(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
     """Get the contact state from a sensor."""
     contact_forces = env.scene[sensor_cfg.name].data.net_forces_w
     contacts = (
         contact_forces.norm(dim=2) > env.scene["contact_forces"].cfg.force_threshold
     )
     return contacts
+
+
+@generic_io_descriptor(
+    observation_type="RootState",
+    on_inspect=[record_shape, record_dtype],
+)
+def contact_state_controller(env: ManagerBasedEnv) -> torch.Tensor:
+    """Get the contact state from the controller."""
+    controllers: VectorPool[Sim2RealInterface] = env.cfg.robot_controllers  # type: ignore
+    
+    # controllers won't be initilized when the on_inspect is called, in that case return fake data.
+    # this should only happen once in the beginning of training when the env is created
+    if controllers is None:
+        logger.warning("Controllers are not initialized, returning fake data. Normal 1 time only.")
+        return torch.zeros((env.num_envs, 4), device=env.device, dtype=torch.bool)
+
+    contacts: np.ndarray = controllers.call(
+        Sim2RealInterface.get_contact_state,
+        mask=None
+    )
+    # FR, FL, RR, RL to FL, FR, RL, RR
+    contacts = contacts[:, [1, 0, 3, 2]]
+    contacts_gpu = torch.from_numpy(contacts).to(env.device)
+    return contacts_gpu
 
 
 @configclass
@@ -104,22 +134,31 @@ class ObservationsCfg:
             params={"command_name": "base_velocity"},
         )
 
-        contact_state = ObsTerm(
-            func=contact_state,
-            params={"sensor_cfg": SceneEntityCfg("contact_forces")},
+        # contact_state_sensor = ObsTerm(
+        #     func=contact_state_sensors,
+        #     params={"sensor_cfg": SceneEntityCfg("contact_forces")},
+        # )
+        
+        contact_state_controller = ObsTerm(
+            func=contact_state_controller,
+            params={},
         )
+        
         FR_foot_scanner = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("FR_foot_scanner")},
         )
+        
         FL_foot_scanner = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("FL_foot_scanner")},
         )
+        
         RL_foot_scanner = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("RL_foot_scanner")},
         )
+        
         RR_foot_scanner = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("RR_foot_scanner")},

@@ -2,7 +2,12 @@
 import numpy as np
 from nptyping import Float32, NDArray, Shape, Bool
 
-from src.control import RobotRunnerMin, RobotType, mpc
+try:
+    from src.control import RobotRunnerMin, RobotType
+except ImportError as e:
+    raise ImportError(
+        "Failed to import from src.control. Make sure the control module is correctly installed."
+    ) from e
 from src.sim2real.abstractinterface import Sim2RealInterface
 import logging
 from src import get_logger
@@ -57,6 +62,7 @@ class SimInterface(Sim2RealInterface):
 
         return torques_converted
 
+    # override
     def reset(self) -> None:
         """Resets the robot"""
         # TODO: find out why robot_runner.reset() causes issues
@@ -132,5 +138,6 @@ class SimInterface(Sim2RealInterface):
     def get_swing_phase(self) -> NDArray[Shape["4"], Float32]:
         return self.robot_runner.cMPC.gait.getSwingPhase().flatten()
     
+    # override
     def get_swing_durations(self) -> NDArray[Shape["4, 1"], Float32]:
         return self.robot_runner.cMPC.gait.swing_durations
