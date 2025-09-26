@@ -26,18 +26,20 @@ def a_foot_in_swing(
 class RewardsCfg:
     """Reward terms for the MDP."""
 
+    # rewards
     alive = RewTerm(func=mdp.is_alive, weight=0.2)
-
-    terminating = RewTerm(func=mdp.is_terminated, weight=-5.0)
-
-    xy_tracking = RewTerm(func=mdp.track_lin_vel_xy_exp, weight=0.4, params={
-        "std": 2,
+    a_foot_in_swing = RewTerm(func=a_foot_in_swing, weight=0.25)
+    xy_tracking = RewTerm(func=mdp.track_lin_vel_xy_exp, weight=1.0, params={
+        "std": 0.5,
+        "command_name": "base_velocity",
+    })
+    yaw_tracking = RewTerm(func=mdp.track_ang_vel_z_exp, weight=1.0, params={
+        "std": 0.5,
         "command_name": "base_velocity",
     })
 
-    yaw_tracking = RewTerm(func=mdp.track_ang_vel_z_exp, weight=0.4, params={
-        "std": 2,
-        "command_name": "base_velocity",
-    })
-
-    a_foot_in_swing = RewTerm(func=a_foot_in_swing, weight=0.4)
+    # penalties
+    terminating = RewTerm(func=mdp.is_terminated, weight=-200.0)
+    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
+    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.5)
