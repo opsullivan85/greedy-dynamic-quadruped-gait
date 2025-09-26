@@ -117,6 +117,7 @@ class Gaitnet(nn.Module):
             nn.LayerNorm(shared_encoder_dim),
             nn.ReLU(),
         )
+        logger.info(f"robot state encoder\n{self.robot_state_encoder}")
 
         # Footstep option encoder (processes each option)
         # Input: [leg_idx_one_hot(4), x_offset, y_offset, cost]
@@ -130,6 +131,7 @@ class Gaitnet(nn.Module):
             nn.LayerNorm(footstep_encoder_dim),
             nn.ReLU(),
         )
+        logger.info(f"footstep encoder\n{self.footstep_encoder}")
 
         # Shared trunk for both outputs
         self.shared_trunk = nn.Sequential(
@@ -140,15 +142,18 @@ class Gaitnet(nn.Module):
             nn.LayerNorm(hidden_dim // 2),
             nn.ReLU(),
         )
+        logger.info(f"shared trunk\n{self.shared_trunk}")
 
         # Value head: outputs reward value
         self.value_head = nn.Linear(hidden_dim // 2, 1)
+        logger.info(f"value head\n{self.value_head}")
 
         # Duration head: outputs swing duration
         self.duration_head = nn.Sequential(
             nn.Linear(hidden_dim // 2, 1),
             nn.Sigmoid(),  # Normalize to [0, 1], scale later to actual duration range
         )
+        logger.info(f"duration head\n{self.duration_head}")
 
         # Special embedding for "no action" option
         self.no_action_embedding = nn.Parameter(torch.randn(footstep_encoder_dim))

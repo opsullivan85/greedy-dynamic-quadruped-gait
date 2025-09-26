@@ -49,7 +49,7 @@ def get_checkpoint_path() -> Path:
     Returns:
         Path: Path to the model checkpoint.
     """
-    checkpoint_dir = PROJECT_ROOT / "training" / "checkpoints"
+    checkpoint_dir = PROJECT_ROOT / "training" / "contactnet" / "checkpoints"
     if args.checkpoint_name:
         checkpoint_path = checkpoint_dir / args.checkpoint_name / "best_model.pt"
         if not checkpoint_path.exists():

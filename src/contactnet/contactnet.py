@@ -288,8 +288,8 @@ class ContactNetTrainer:
         timestamp = datetime.now().isoformat(timespec="seconds").replace(":", "-")
 
         # Create directories
-        self.log_dir = PROJECT_ROOT / "training" / "runs" / f"quadruped_{timestamp}"
-        self.checkpoint_dir = PROJECT_ROOT / "training" / "checkpoints" / f"quadruped_{timestamp}"
+        self.log_dir = PROJECT_ROOT / "training" / "contactnet" / "runs" / f"quadruped_{timestamp}"
+        self.checkpoint_dir = PROJECT_ROOT / "training" / "contactnet" / "checkpoints" / f"quadruped_{timestamp}"
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize tensorboard writer
