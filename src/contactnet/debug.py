@@ -45,6 +45,9 @@ def view_footstep_cost_map(
 
     # Compute global min and max for consistent colorbar, excluding NaN and inf
     valid_mask = ~np.isnan(cost_map) & ~np.isinf(cost_map)
+    if not np.any(valid_mask):
+        logger.debug("Cost map contains no valid (finite) values to display.")
+        return
     vmin = float(np.min(cost_map[valid_mask])) if vmin is None else vmin
     vmax = float(np.max(cost_map[valid_mask])) if vmax is None else vmax
 
