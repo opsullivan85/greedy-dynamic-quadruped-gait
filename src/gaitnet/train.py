@@ -37,6 +37,8 @@ simulation_app = app_launcher.app
 
 import multiprocessing
 import signal
+import datetime
+import os
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # type: ignore
 from src.gaitnet.gaitnet import GaitNetActorCritic, FootstepOptionGenerator
 from rsl_rl.runners import on_policy_runner
@@ -87,6 +89,18 @@ def main():
     # hack to get OnPolicyRunner to be able to initiate a GaitNetActorCritic
     on_policy_runner.__dict__["GaitNetActorCritic"] = GaitNetActorCritic  # type: ignore
 
+    # Create unique experiment name with timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    experiment_name = f"gaitnet_{timestamp}"
+    
+    # Create unique log directory
+    log_dir = f"./training/gaitnet/runs/{experiment_name}"
+    save_dir = f"./training/gaitnet/checkpoints/{experiment_name}"
+    
+    # Create directories if they don't exist
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
+
     # Prepare config dict for OnPolicyRunner
     train_cfg = {
         "algorithm": {
@@ -109,13 +123,11 @@ def main():
             "hidden_dims": [128, 128],
             "get_footstep_options": footstep_option_generator.get_footstep_options,
         },
-        "save_dir": "./training/gaitnet/checkpoints",
-        "experiment_name": "gaitnet",
-        "log_dir": "./training/gaitnet/logs",
-        "num_steps_per_env": 24,
-        "max_iterations": args_cli.max_iterations,
-        "save_interval": 100,
+        "log_dir": log_dir,
+        "num_steps_per_env": 500,  # ~2 episodes per iteration (episode = 250 steps)
+        "save_interval": 10,
         "empirical_normalization": False,
+        "logger": "tensorboard",  # Explicitly set TensorBoard as logger
     }
 
     runner = on_policy_runner.OnPolicyRunner(
@@ -131,21 +143,17 @@ def main():
         runner.load(args_cli.resume)
 
     logger.info("Starting training...")
-    iteration = 0
-    while iteration < args_cli.max_iterations and not shutdown_requested:
-        runner.learn(num_learning_iterations=1)
-        iteration += 1
-        if iteration % train_cfg["save_interval"] == 0:
-            logger.info(f"Saving checkpoint at iteration {iteration}")
-            runner.save(f"./logs/checkpoints/checkpoint_{iteration}.pt")
-
-    # Final save at the end of training
-    if not shutdown_requested:
+    
+    # Let the runner handle the entire training loop
+    # This ensures proper TensorBoard logging continuity
+    try:
+        runner.learn(num_learning_iterations=args_cli.max_iterations)
         logger.info("Training completed successfully")
-        runner.save(f"./logs/checkpoints/checkpoint_{args_cli.max_iterations}.pt")
-    else:
-        logger.info("Training interrupted, saving checkpoint")
-        runner.save(f"./logs/checkpoints/checkpoint_{iteration}.pt")
+    except KeyboardInterrupt:
+        logger.info("Training interrupted by user")
+    except Exception as e:
+        logger.error(f"Training failed with error: {e}")
+        raise
 
     logger.info("Closing environments")
     env.close()

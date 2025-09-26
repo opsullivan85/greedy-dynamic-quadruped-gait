@@ -56,7 +56,7 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 0.004  # simulation timestep -> 250 Hz physics
         self.sim.physics_material = self.scene.terrain.physics_material
 
-        self.episode_length_s = 5
+        self.episode_length_s = 10
 
 
 def _make_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
