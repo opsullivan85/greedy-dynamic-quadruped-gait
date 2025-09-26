@@ -137,15 +137,15 @@ def main():
         iteration += 1
         if iteration % train_cfg["save_interval"] == 0:
             logger.info(f"Saving checkpoint at iteration {iteration}")
-            runner.save(f"./logs/checkpoint_{iteration}.pt")
+            runner.save(f"./logs/checkpoints/checkpoint_{iteration}.pt")
 
     # Final save at the end of training
     if not shutdown_requested:
         logger.info("Training completed successfully")
-        runner.save(f"./logs/checkpoint_{args_cli.max_iterations}.pt")
+        runner.save(f"./logs/checkpoints/checkpoint_{args_cli.max_iterations}.pt")
     else:
         logger.info("Training interrupted, saving checkpoint")
-        runner.save(f"./logs/checkpoint_{iteration}.pt")
+        runner.save(f"./logs/checkpoints/checkpoint_{iteration}.pt")
 
     logger.info("Closing environments")
     env.close()

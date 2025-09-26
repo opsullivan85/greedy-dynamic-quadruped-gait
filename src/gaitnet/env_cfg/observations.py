@@ -92,6 +92,7 @@ def contact_state_controller(env: ManagerBasedEnv) -> torch.Tensor:
     )
     # FR, FL, RR, RL to FL, FR, RL, RR
     contacts = contacts[:, [1, 0, 3, 2]]
+    # logger.info(f"contact: {contacts[0]}")
     contacts_gpu = torch.from_numpy(contacts).to(env.device)
     return contacts_gpu
 

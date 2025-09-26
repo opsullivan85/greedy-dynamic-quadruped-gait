@@ -20,7 +20,7 @@ class TerminationsCfg:
     bad_height = DoneTerm(
         func=mdp.root_height_below_minimum,
         params={
-            "minimum_height": 0.2,
+            "minimum_height": 0.15,
             "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
         },
     )

@@ -263,6 +263,12 @@ class Gaitnet(nn.Module):
         all_values = torch.cat(option_values, dim=-1)  # (batch, num_options + 1)
         all_durations = torch.cat(option_durations, dim=-1)  # (batch, num_options + 1)
 
+        # logger.info(f"cost: {footstep_costs[0].detach().cpu().numpy().tolist()}")
+        # # if all of footstep_costs[0] are inf
+        # if torch.all(torch.isinf(footstep_costs[0])):
+        #     pass
+        # logger.info(f"value: {all_values[0].detach().cpu().numpy().tolist()}")
+
         return footstep_options, all_values, all_durations
 
 
