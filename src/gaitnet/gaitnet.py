@@ -29,7 +29,8 @@ class FootstepOptionGenerator:
                           total shape is (num_options, 3)
             torch.Tensor: Corresponding costs of shape (num_envs, num_options)
         """
-        cost_maps = self.cost_map_generator.predict(obs)  # (num_envs, 4, H, W)
+        with torch.inference_mode():
+            cost_maps = self.cost_map_generator.predict(obs)  # (num_envs, 4, H, W)
 
         # remove options with invalid terrain
         valid_height_range = self.env.cfg.valid_height_range  # type: ignore
@@ -42,9 +43,18 @@ class FootstepOptionGenerator:
         # here 18:22 are the contact states for the 4 legs
         contact_states = obs[:, 18:22].bool()  # (num_envs, 4)
         swing_states = ~contact_states  # (num_envs, 4)
-        swing_states = swing_states.unsqueeze(-1).unsqueeze(-1)  # (num_envs, 4, 1, 1)
         masked_cost_maps = torch.where(
-            swing_states, torch.tensor(float("inf"), device=cost_maps.device), masked_cost_maps
+            swing_states.unsqueeze(-1).unsqueeze(-1), torch.tensor(float("inf"), device=cost_maps.device), masked_cost_maps
+        )
+
+        # require atleast 1 leg to be in contact
+        # by setting all costs to inf if only 1 leg is in contact
+        num_legs_in_contact = contact_states.sum(dim=1)  # (num_envs,)
+        only_one_contact = num_legs_in_contact <= 2  # (num_envs,)
+        masked_cost_maps = torch.where(
+            only_one_contact.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1),
+            torch.tensor(float("inf"), device=cost_maps.device),
+            masked_cost_maps,
         )
 
         # get the best options

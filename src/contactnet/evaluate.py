@@ -60,7 +60,7 @@ def compare_model_output(
             device
         )  # Add batch dimension: [input_dim] -> [1, input_dim]
 
-        with torch.no_grad():
+        with torch.inference_mode():
             calculated_costmap = model(state)
 
         # Remove batch dimension before reshaping
@@ -102,7 +102,7 @@ def benchmark_model_evaluation(
         num_runs (int): Number of evaluation runs to perform.
     """
     model.eval()
-    with torch.no_grad():
+    with torch.inference_mode():
         start_time = time.time()
         for _ in range(num_runs):
             random_input = torch.randn(1, input_dim).to(device)

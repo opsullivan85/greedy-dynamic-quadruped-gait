@@ -349,7 +349,7 @@ class ContactNetTrainer:
         self.model.eval()
         total_loss = 0.0
 
-        with torch.no_grad():
+        with torch.inference_mode():
             for states, cost_maps in self.val_loader:
                 states = states.to(self.device)
                 cost_maps = cost_maps.to(self.device)

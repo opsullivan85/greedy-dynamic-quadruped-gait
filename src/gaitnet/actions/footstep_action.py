@@ -99,8 +99,8 @@ class FSCActionTerm(ActionTerm):
         mask = processed_actions_cpu[:, 0] != NO_STEP
         footstep_parameters = self.footstep_kwargs(processed_actions_cpu)
 
-        act0 = actions[0]
-        logger.info(act0.cpu().numpy().tolist())
+        # act0 = actions[0]
+        # logger.info(act0.cpu().numpy().tolist())
 
         # initiate the footsteps
         robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.env_cfg.robot_controllers  # type: ignore
