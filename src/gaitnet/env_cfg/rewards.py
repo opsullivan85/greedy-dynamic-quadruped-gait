@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from isaaclab.envs import ManagerBasedRLEnv, mdp
-import isaaclab_tasks.manager_based.locomotion.velocity.mdp as vmdp  # type: ignore
+import isaaclab_tasks.manager_based.locomotion.velocity.config.spot.mdp as spot_mdp  # type: ignore
 from isaaclab.managers import RewardTermCfg as RewTerm, SceneEntityCfg
 from isaaclab.utils import configclass
 from src.sim2real import Sim2RealInterface
@@ -51,7 +51,7 @@ class RewardsCfg:
     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.5)
     foot_slip = RewTerm(
-        func=vmdp.foot_slip_penalty,
+        func=spot_mdp.foot_slip_penalty,
         weight=-0.5,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
