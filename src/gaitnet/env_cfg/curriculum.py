@@ -17,7 +17,7 @@ class CurriculumCfg:
         params={
             "term_name": "a_foot_in_swing",
             "weight": 0,
-            "num_steps": 20,
+            "num_steps": 0,
         },
     )
 

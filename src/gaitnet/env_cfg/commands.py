@@ -1,8 +1,8 @@
 from isaaclab.envs import mdp
 from isaaclab.utils import configclass
 
-max_xy_vel = 0.1
-max_raw_rate = 0.2
+max_xy_vel = 0.2
+max_raw_rate = 0.4
 
 @configclass
 class CommandsCfg:

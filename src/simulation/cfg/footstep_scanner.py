@@ -1,18 +1,20 @@
 from typing import Callable
 
 from isaaclab.sensors import RayCasterCfg, patterns
-from src.simulation.cfg.footstep_scanner_constants import grid_resolution, grid_size  # type: ignore
+from src.simulation.cfg.footstep_scanner_constants import grid_resolution, grid_size, upscale_factor  # type: ignore
 
+real_grid_resolution = grid_resolution / upscale_factor
+real_grid_size = (grid_size[0] * upscale_factor + 1, grid_size[1] * upscale_factor + 1)
 
 _hip_names = ["FL_hip", "FR_hip", "RL_hip", "RR_hip"]
 
 # Configure offset positions for the raycasters relative to each hip
 # note that all axes are in the same orientation as the robot body frame
 _stable_footstep_offsets = {
-    _hip_names[0]: [0.0, 0.0],
-    _hip_names[1]: [0.0, -0.0],
-    _hip_names[2]: [-0.0, 0.0],
-    _hip_names[3]: [-0.0, -0.0],
+    _hip_names[0]: (0.0, 0.0),
+    _hip_names[1]: (0.0, -0.0),
+    _hip_names[2]: (-0.0, 0.0),
+    _hip_names[3]: (-0.0, -0.0),
 }
 _height_scanner_offsets = {
     hip_name: RayCasterCfg.OffsetCfg(pos=(*_stable_footstep_offsets[hip_name], 20.0))
@@ -28,11 +30,11 @@ _height_scanner_settings = {
         "update_period": 0.00,  # every sim step
         "ray_alignment": "yaw",
         "pattern_cfg": patterns.GridPatternCfg(
-            resolution=grid_resolution,
-            size=[
-                (grid_size[0] - 1) * grid_resolution,
-                (grid_size[1] - 1) * grid_resolution,
-            ],
+            resolution=real_grid_resolution,
+            size=(
+                (real_grid_size[0] - 1) * real_grid_resolution,
+                (real_grid_size[1] - 1) * real_grid_resolution,
+            ),
         ),
         "debug_vis": True,
         "mesh_prim_paths": ["/World/ground"],

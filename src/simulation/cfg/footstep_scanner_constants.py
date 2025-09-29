@@ -8,6 +8,8 @@ grid_resolution: float = 0.075
 """Distance between rays in the grid and overall grid size"""
 grid_size: tuple[int, int] = (5, 5)
 """Odd numbers will be centered on the _stable_footstep_offset"""
+upscale_factor: int = 2
+"""Factor to increase the resolution of the raycast grid by. Not seen in observations"""
 
 def idx_to_xy(indices: torch.Tensor) -> torch.Tensor:
     """Convert from grid indices to (x, y) coordinates in meters.

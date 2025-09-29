@@ -14,6 +14,8 @@ from isaaclab.envs.utils.io_descriptors import (
     record_shape,
 )
 import src.simulation.cfg.footstep_scanner_constants as fs
+from src.simulation.cfg.footstep_scanner import real_grid_size
+import torch.nn.functional as F
 from src.util.vectorpool import VectorPool
 from src.sim2real.abstractinterface import Sim2RealInterface
 from src import get_logger
@@ -100,8 +102,10 @@ def contact_state_controller(env: ManagerBasedEnv) -> torch.Tensor:
     return contacts_gpu
 
 
-def areaheight_scan(
-    env: ManagerBasedEnv, sensor_cfgs: list[SceneEntityCfg], offset: float = 0.5
+def cspace_height_scan(
+    env: ManagerBasedEnv,
+    sensor_cfg: SceneEntityCfg,
+    offset: float = 0.5,
 ) -> torch.Tensor:
     """Height scan from the given sensor w.r.t. the sensor's frame.
 
@@ -109,15 +113,15 @@ def areaheight_scan(
 
     The provided offset (Defaults to 0.5) is subtracted from the returned values.
     """
-    height_scans = []
-    for sensor_cfg in sensor_cfgs:
-        height_scans.append(
-            mdp.height_scan(env=env, sensor_cfg=sensor_cfg, offset=offset)
-        )
-    height_scans = torch.cat(height_scans, dim=1)
-    # get the minimum height in each grid cell
-    min_heights, _ = torch.min(height_scans, dim=1, keepdim=False)
-    return min_heights
+    height_scan = mdp.height_scan(env=env, sensor_cfg=sensor_cfg, offset=offset)
+    height_scan = height_scan.reshape((-1, *real_grid_size))
+
+    # pool the height scan to match the desired grid size
+    kernel_size = 2 * fs.upscale_factor - 1
+    stride = fs.upscale_factor
+    heights_pooled = F.max_pool2d(height_scan, kernel_size=kernel_size, stride=stride)
+    heights_pooled = heights_pooled.reshape(heights_pooled.shape[0], -1)
+    return heights_pooled
 
 
 @configclass
@@ -168,24 +172,24 @@ class ObservationsCfg:
             params={},
         )
 
-        FR_scanner = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("FR_scanner")},
+        FR_foot_scanner = ObsTerm(
+            func=cspace_height_scan,
+            params={"sensor_cfg": SceneEntityCfg("FR_foot_scanner")},
         )
 
-        FL_scanner = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("FL_scanner")},
+        FL_foot_scanner = ObsTerm(
+            func=cspace_height_scan,
+            params={"sensor_cfg": SceneEntityCfg("FL_foot_scanner")},
         )
 
-        RL_scanner = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("RL_scanner")},
+        RL_foot_scanner = ObsTerm(
+            func=cspace_height_scan,
+            params={"sensor_cfg": SceneEntityCfg("RL_foot_scanner")},
         )
 
-        RR_scanner = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("RR_scanner")},
+        RR_foot_scanner = ObsTerm(
+            func=cspace_height_scan,
+            params={"sensor_cfg": SceneEntityCfg("RR_foot_scanner")},
         )
 
         def __post_init__(self):

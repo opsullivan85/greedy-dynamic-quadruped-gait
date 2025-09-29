@@ -80,7 +80,7 @@ def main():
     obs_space = env.observation_space["policy"].shape[1]
     # action_space = env.action_space.shape[1]
     # 2 per leg
-    num_footstep_candidates = 8
+    num_footstep_candidates = 16
 
     footstep_option_generator = FootstepOptionGenerator(
         env=env.unwrapped,
