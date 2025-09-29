@@ -41,6 +41,7 @@ import datetime
 import os
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # type: ignore
 from src.gaitnet.gaitnet import GaitNetActorCritic, FootstepOptionGenerator
+import src.simulation.cfg.footstep_scanner_constants as fs
 from rsl_rl.runners import on_policy_runner
 import rsl_rl.modules
 from src.gaitnet.env_cfg.gaitnet_env import get_env
@@ -78,9 +79,10 @@ def main():
     env = RslRlVecEnvWrapper(env)
 
     obs_space = env.observation_space["policy"].shape[1]
+    robot_state_dim = obs_space - (4*fs.grid_size[0]*fs.grid_size[1])  # subtract height scan
     # action_space = env.action_space.shape[1]
     # 2 per leg
-    num_footstep_candidates = 16
+    num_footstep_candidates = 12
 
     footstep_option_generator = FootstepOptionGenerator(
         env=env.unwrapped,
@@ -119,7 +121,7 @@ def main():
         },
         "policy": {
             "class_name": "GaitNetActorCritic",
-            "robot_state_dim": obs_space,
+            "robot_state_dim": 22,
             "num_footstep_options": num_footstep_candidates,
             "hidden_dims": [128, 128],
             "get_footstep_options": footstep_option_generator.get_footstep_options,
