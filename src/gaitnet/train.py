@@ -121,7 +121,7 @@ def main():
         },
         "policy": {
             "class_name": "GaitNetActorCritic",
-            "robot_state_dim": 22,
+            "robot_state_dim": robot_state_dim,
             "num_footstep_options": num_footstep_candidates,
             "hidden_dims": [128, 128],
             "get_footstep_options": footstep_option_generator.get_footstep_options,
