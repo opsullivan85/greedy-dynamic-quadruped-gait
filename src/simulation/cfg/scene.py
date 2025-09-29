@@ -33,7 +33,7 @@ class SceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/.*_foot",
         update_period=0.0,
         debug_vis=False,
-        track_air_time=True,
+        track_air_time=False,
     )
 
     light = AssetBaseCfg(

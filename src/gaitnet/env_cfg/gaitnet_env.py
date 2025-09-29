@@ -2,6 +2,7 @@ from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
 from isaaclab.utils import configclass
 
 from src import sim2real
+from src.gaitnet.env_cfg.curriculum import CurriculumCfg
 from src.simulation.cfg.scene import SceneCfg
 import numpy as np
 
@@ -31,6 +32,7 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
     terminations: TerminationsCfg = TerminationsCfg()  # type: ignore
     rewards: RewardsCfg = RewardsCfg()  # type: ignore
     commands: CommandsCfg = CommandsCfg()  # type: ignore
+    curriculum: CurriculumCfg = CurriculumCfg()  # type: ignore
 
     robot_controllers: VectorPool[sim2real.Sim2RealInterface] = None  # type: ignore to be set later
 
