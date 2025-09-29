@@ -14,6 +14,9 @@ from src.contactnet.debug import view_footstep_cost_map
 
 logger = get_logger()
 
+from src import PROJECT_ROOT
+data_path = PROJECT_ROOT / "contact_schedule.csv"
+
 
 class FootstepOptionGenerator:
     def __init__(self, env: ManagerBasedRLEnv, num_options: int = 5):
@@ -514,6 +517,10 @@ class GaitNetActorCritic(ActorCritic):
         # Cache for log_prob computation
         self._cached_selected_actions = selected_actions.clone()
         self._cached_selected_log_probs = selected_log_probs
+
+        with open(data_path, "a") as f:
+            action = selected_actions[0].detach().cpu().numpy()
+            f.write(f"{action[0]},{action[1]},{action[2]},{action[3]}\n")
 
         return selected_actions
 
