@@ -49,20 +49,20 @@ from src import get_logger
 
 logger = get_logger()
 
-# Global flag for graceful shutdown
-shutdown_requested = False
+# # Global flag for graceful shutdown
+# shutdown_requested = False
 
 
-def signal_handler(sig, frame):
-    global shutdown_requested
-    if multiprocessing.current_process().name == "MainProcess":
-        signal_name = signal.Signals(sig).name
-        logger.info(f"signal {signal_name} received in main process, shutting down...")
-    shutdown_requested = True
+# def signal_handler(sig, frame):
+#     global shutdown_requested
+#     if multiprocessing.current_process().name == "MainProcess":
+#         signal_name = signal.Signals(sig).name
+#         logger.info(f"signal {signal_name} received in main process, shutting down...")
+#     shutdown_requested = True
 
 
-# Set up the signal handler for SIGINT (Ctrl+C)
-signal.signal(signal.SIGINT, signal_handler)
+# # Set up the signal handler for SIGINT (Ctrl+C)
+# signal.signal(signal.SIGINT, signal_handler)
 
 ###############################################################################
 ###############################################################################

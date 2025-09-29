@@ -1,4 +1,5 @@
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
+from isaaclab.sensors import SensorBaseCfg
 from isaaclab.utils import configclass
 
 from src import sim2real
@@ -68,14 +69,13 @@ def _make_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
     cfg.sim.device = device
     # update sensor update periods
     # we tick all the sensors based on the smallest update period (physics update period)
-    for scanner in [
-        cfg.scene.FR_foot_scanner,
-        cfg.scene.FL_foot_scanner,
-        cfg.scene.RL_foot_scanner,
-        cfg.scene.RR_foot_scanner,
-        cfg.scene.contact_forces,
-    ]:
-        scanner.update_period = cfg.decimation * cfg.sim.dt  # control rate
+    # update all properties of cfg.scene which subclass SensorBaseCfg
+    for attr_name in cfg.scene.__dir__():
+        attr = getattr(cfg.scene, attr_name)
+        if not issubclass(type(attr), SensorBaseCfg):
+            continue
+        sensor: SensorBaseCfg = attr  # type: ignore
+        sensor.update_period = cfg.decimation * cfg.sim.dt  # control rate
     return cfg
 
 

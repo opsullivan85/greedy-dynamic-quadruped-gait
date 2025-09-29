@@ -4,7 +4,7 @@ from isaaclab.envs import mdp
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.sensors import ContactSensor
+from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from src.gaitnet.actions.mpc_action import ManagerBasedEnv
@@ -63,7 +63,9 @@ def foot_position_xy_b(
     observation_type="RootState",
     on_inspect=[record_shape, record_dtype],
 )
-def contact_state_sensors(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+def contact_state_sensors(
+    env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg
+) -> torch.Tensor:
     """Get the contact state from a sensor."""
     contact_forces = env.scene[sensor_cfg.name].data.net_forces_w
     contacts = (
@@ -79,22 +81,43 @@ def contact_state_sensors(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg) -> t
 def contact_state_controller(env: ManagerBasedEnv) -> torch.Tensor:
     """Get the contact state from the controller."""
     controllers: VectorPool[Sim2RealInterface] = env.cfg.robot_controllers  # type: ignore
-    
+
     # controllers won't be initilized when the on_inspect is called, in that case return fake data.
     # this should only happen once in the beginning of training when the env is created
     if controllers is None:
-        logger.warning("Controllers are not initialized, returning fake data. Normal 1 time only.")
+        logger.warning(
+            "Controllers are not initialized, returning fake data. Normal 1 time only."
+        )
         return torch.zeros((env.num_envs, 4), device=env.device, dtype=torch.bool)
 
     contacts: np.ndarray = controllers.call(
-        Sim2RealInterface.get_contact_state,
-        mask=None
+        Sim2RealInterface.get_contact_state, mask=None
     )
     # FR, FL, RR, RL to FL, FR, RL, RR
     contacts = contacts[:, [1, 0, 3, 2]]
     # logger.info(f"contact: {contacts[0]}")
     contacts_gpu = torch.from_numpy(contacts).to(env.device)
     return contacts_gpu
+
+
+def areaheight_scan(
+    env: ManagerBasedEnv, sensor_cfgs: list[SceneEntityCfg], offset: float = 0.5
+) -> torch.Tensor:
+    """Height scan from the given sensor w.r.t. the sensor's frame.
+
+    assumes all sensor_cfgs point to RayCaster sensors with the same grid size
+
+    The provided offset (Defaults to 0.5) is subtracted from the returned values.
+    """
+    height_scans = []
+    for sensor_cfg in sensor_cfgs:
+        height_scans.append(
+            mdp.height_scan(env=env, sensor_cfg=sensor_cfg, offset=offset)
+        )
+    height_scans = torch.cat(height_scans, dim=1)
+    # get the minimum height in each grid cell
+    min_heights, _ = torch.min(height_scans, dim=1, keepdim=False)
+    return min_heights
 
 
 @configclass
@@ -139,30 +162,30 @@ class ObservationsCfg:
         #     func=contact_state_sensors,
         #     params={"sensor_cfg": SceneEntityCfg("contact_forces")},
         # )
-        
+
         contact_state_controller = ObsTerm(
             func=contact_state_controller,
             params={},
         )
-        
-        FR_foot_scanner = ObsTerm(
+
+        FR_scanner = ObsTerm(
             func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("FR_foot_scanner")},
+            params={"sensor_cfg": SceneEntityCfg("FR_scanner")},
         )
-        
-        FL_foot_scanner = ObsTerm(
+
+        FL_scanner = ObsTerm(
             func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("FL_foot_scanner")},
+            params={"sensor_cfg": SceneEntityCfg("FL_scanner")},
         )
-        
-        RL_foot_scanner = ObsTerm(
+
+        RL_scanner = ObsTerm(
             func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("RL_foot_scanner")},
+            params={"sensor_cfg": SceneEntityCfg("RL_scanner")},
         )
-        
-        RR_foot_scanner = ObsTerm(
+
+        RR_scanner = ObsTerm(
             func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("RR_foot_scanner")},
+            params={"sensor_cfg": SceneEntityCfg("RR_scanner")},
         )
 
         def __post_init__(self):
@@ -173,14 +196,16 @@ class ObservationsCfg:
     policy: PolicyCfg = PolicyCfg()
 
 
-def get_terrain_mask(valid_height_range: tuple[float, float], obs: torch.Tensor) -> torch.Tensor:
+def get_terrain_mask(
+    valid_height_range: tuple[float, float], obs: torch.Tensor
+) -> torch.Tensor:
     """Get a mask for the terrain observations.
-    
+
     0 indicates invalid terrain (too high or too low)
     1 indicates valid terrain
     """
     terrain_terms = fs.grid_size[0] * fs.grid_size[1] * 4
-    terrain_obs = obs[:, -terrain_terms :]
+    terrain_obs = obs[:, -terrain_terms:]
     # reshape to (N, 4, H, W)
     terrain_obs = terrain_obs.reshape(
         terrain_obs.shape[0], 4, fs.grid_size[0], fs.grid_size[1]
