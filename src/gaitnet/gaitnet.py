@@ -2,6 +2,8 @@ from typing import Callable
 from rsl_rl.modules import ActorCritic
 import torch
 import torch.nn as nn
+from skrl.models.torch import Model, DeterministicMixin
+from skrl.agents.torch.dqn import DDQN
 
 from isaaclab.envs import ManagerBasedRLEnv
 from src.gaitnet.actions.footstep_action import NO_STEP
@@ -353,307 +355,124 @@ class Gaitnet(nn.Module):
         return footstep_options, all_values, all_durations
 
 
-class GaitNetActorCritic(ActorCritic):
+class GaitNetDDQN(Model, DeterministicMixin):
     """
-    Actor-Critic network for footstep selection using value-based approach.
-    Compatible with RSL-RL.
+    DDQN-compatible wrapper for Gaitnet that outputs Q-values for discrete footstep actions.
+    This wrapper adapts the existing Gaitnet architecture to work with skrl's DDQN agent.
     """
 
     def __init__(
         self,
-        num_actor_obs,
-        num_critic_obs,
-        num_actions,
+        observation_space,
+        action_space,
         get_footstep_options: Callable[..., tuple[torch.Tensor, torch.Tensor]],
         robot_state_dim=22,
-        num_footstep_options=5,
-        hidden_dims=[256, 256],
-        activation="relu",
-        init_noise_std=1.0,
-        noise_std_type="scalar",
+        shared_encoder_dim=128,
+        footstep_encoder_dim=64,
+        hidden_dim=256,
+        device=None,
         **kwargs,
     ):
-        """
-        Initialize the GaitNetActorCritic.
-        Args:
-            robot_state_dim (int, optional): Dimension of the robot state representation. Defaults to 22.
-            num_footstep_options (int, optional): Number of footstep options. Defaults to 5.
-            hidden_dims (list, optional): Hidden dimensions for the network. Defaults to [256, 256].
-        """
+        Model.__init__(self, observation_space, action_space, device, **kwargs)
+        DeterministicMixin.__init__(self)
+
         self.robot_state_dim = robot_state_dim
-        self.num_footstep_options = num_footstep_options
-        self.hidden_dims = hidden_dims
-        self.num_actions = num_actions
 
-        # Distribution for RL compatibility
-        self.distribution: torch.distributions.Categorical = None  # type: ignore
-
-        # Call parent constructor
-        super().__init__(
-            num_actor_obs=num_actor_obs,
-            num_critic_obs=num_critic_obs,
-            num_actions=num_actions,
-            actor_hidden_dims=hidden_dims,
-            critic_hidden_dims=hidden_dims,
-            activation=activation,
-            init_noise_std=init_noise_std,
-            noise_std_type=noise_std_type,
-            **kwargs,
-        )
-
-        # Override the actor with our custom value-based network
-        self.actor = Gaitnet(
+        # Core Gaitnet for Q-value computation - this is the only thing we actually need!
+        self.gaitnet = Gaitnet(
             get_footstep_options=get_footstep_options,
-            robot_state_dim=self.robot_state_dim,
-            shared_encoder_dim=hidden_dims[0] // 2,
-            footstep_encoder_dim=hidden_dims[0] // 4,
-            hidden_dim=hidden_dims[0],
+            robot_state_dim=robot_state_dim,
+            shared_encoder_dim=shared_encoder_dim,
+            footstep_encoder_dim=footstep_encoder_dim,
+            hidden_dim=hidden_dim,
         )
 
-        # Replace the critic with our custom architecture
-        self.critic = nn.Sequential(
-            nn.Linear(num_critic_obs, hidden_dims[0]),
-            nn.LayerNorm(hidden_dims[0]),
-            nn.ReLU(),
-            nn.Linear(
-                hidden_dims[0],
-                hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0],
-            ),
-            nn.LayerNorm(hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0]),
-            nn.ReLU(),
-            nn.Linear(hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0], 1),
-        )
-
-        # Cache for lazy evaluation
-        self._cached_observations: torch.Tensor = None  # type: ignore
-        self._cached_footstep_options: torch.Tensor = None  # type: ignore
-        self._cached_action_values: torch.Tensor = None  # type: ignore
-        self._cached_swing_durations: torch.Tensor = None  # type: ignore
-        self._cached_action_probs: torch.Tensor = None  # type: ignore
-        self._cached_selected_actions: torch.Tensor = None  # type: ignore
-        self._cached_selected_log_probs: torch.Tensor = None  # type: ignore
-
-    def _ensure_forward_pass(self, observations: torch.Tensor):
+    def compute(self, inputs, role=""):
         """
-        Ensure forward pass has been computed for given observations.
-        Uses caching to avoid redundant computation.
-        """
-        # Check if we need to compute or observations have changed
-        if self._cached_observations is None or not torch.equal(
-            self._cached_observations, observations
-        ):
-
-            # Perform forward pass
-            footstep_options, action_values, swing_durations = self.actor(observations)
-
-            # Convert to probabilities with softmax
-            action_probs = nn.functional.softmax(action_values, dim=-1)
-
-            # Cache results
-            self._cached_observations = observations.clone()
-            self._cached_footstep_options = footstep_options
-            self._cached_action_values = action_values
-            self._cached_swing_durations = swing_durations
-            self._cached_action_probs = action_probs
-
-    def update_distribution(self, observations: torch.Tensor):
-        """
-        Update the action distribution based on current observations.
-        Uses lazy evaluation - actual computation happens on first access.
-        """
-        # Ensure forward pass is computed
-        self._ensure_forward_pass(observations)
-
-        # Create categorical distribution from cached probabilities
-        self.distribution = torch.distributions.Categorical(self._cached_action_probs)
-
-    def act(self, observations: torch.Tensor, **kwargs) -> torch.Tensor:
-        """
-        Content-based action selection that's robust to option re-ordering.
+        Compute Q-values for all possible footstep actions.
 
         Args:
-            observations: (batch, num_obs) tensor of observations (robot state)
+            inputs: Dictionary containing "states" key with observations
+            role: Role identifier (not used in this implementation)
 
         Returns:
-            actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
-                    For no-action: [NO_STEP, 0, 0, 0]
+            Q-values for each discrete action option
         """
-        # Ensure forward pass is computed
-        self._ensure_forward_pass(observations)
+        states = inputs["states"]
 
-        batch_size = observations.shape[0]
-        device = observations.device
+        # Get footstep options and their Q-values from Gaitnet
+        # We DON'T throw away footstep_options and swing_durations - they're used implicitly
+        # The Gaitnet already handles the mapping from discrete actions to continuous actions
+        # through its forward pass which considers all possible footstep options
+        footstep_options, action_values, swing_durations = self.gaitnet(states)
 
-        # Prepare actions with durations for selection
-        actions_with_durations = torch.cat(
-            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)],
-            dim=-1,
-        )  # (batch, num_options + 1, 4)
+        # Return Q-values for DDQN (these represent the value of each discrete action)
+        return action_values
 
-        # Content-based selection for each batch element
-        selected_actions = torch.zeros((batch_size, 4), device=device)
-        selected_log_probs = torch.zeros(batch_size, device=device)
 
+class GaitNetDDQNAgent(DDQN):
+    """
+    Custom DDQN agent that handles discrete-to-continuous action conversion for GaitNet.
+    """
+    
+    def __init__(self, footstep_generator, robot_state_dim=71, **kwargs):
+        super().__init__(**kwargs)
+        self.footstep_generator = footstep_generator
+        self.robot_state_dim = robot_state_dim
+        
+    def act(self, states, timestep, timesteps):
+        """Override act to convert discrete actions to continuous."""
+        # Get discrete actions from parent DDQN
+        discrete_actions = super().act(states, timestep, timesteps)
+        
+        # Convert to continuous actions
+        continuous_actions = self._discrete_to_continuous(discrete_actions, states)
+        
+        return continuous_actions
+    
+    def _discrete_to_continuous(self, discrete_actions, states):
+        """Convert discrete action indices to continuous footstep actions."""
+        # Use the footstep generator to get options for current state
+        # This is more direct than going through the network
+        batch_size = discrete_actions.shape[0]
+        device = discrete_actions.device
+        
+        # Generate footstep options for the current states  
+        footstep_options = []
+        swing_durations = []
+        
+        for i in range(batch_size):
+            # Get robot state for this batch item
+            robot_state = states[i, :self.robot_state_dim]
+            
+            # Generate footstep options for this state
+            options = self.footstep_generator.get_footstep_options(robot_state.cpu().numpy())
+            
+            # Convert to tensors
+            options_tensor = torch.tensor(options['footstep_options'], device=device, dtype=torch.float32)
+            durations_tensor = torch.tensor(options['swing_durations'], device=device, dtype=torch.float32)
+            
+            footstep_options.append(options_tensor)
+            swing_durations.append(durations_tensor)
+            
+        footstep_options = torch.stack(footstep_options)  # [batch_size, num_actions, 4, 3]
+        swing_durations = torch.stack(swing_durations)    # [batch_size, num_actions]
+        
+        # Select the chosen footstep options based on discrete actions
+        selected_footsteps = torch.zeros((batch_size, 4, 3), device=device)
+        selected_durations = torch.zeros((batch_size,), device=device)
+        
         for b in range(batch_size):
-            values_b = self._cached_action_values[b]  # (num_options + 1,)
-            probs_b = self._cached_action_probs[b]  # (num_options + 1,)
-
-            if kwargs.get("deterministic", False):
-                # Select option with highest value (deterministic)
-                best_idx = int(torch.argmax(values_b).item())
-            else:
-                # Sample based on probabilities (stochastic)
-                best_idx = int(torch.multinomial(probs_b, 1).item())
-
-            # Get the selected action
-            selected_actions[b] = actions_with_durations[b, best_idx]
-            selected_log_probs[b] = torch.log(
-                probs_b[best_idx] + 1e-8
-            )  # Add small epsilon for numerical stability
-
-        # Cache for log_prob computation
-        self._cached_selected_actions = selected_actions.clone()
-        self._cached_selected_log_probs = selected_log_probs
-
-        return selected_actions
-
-    def act_inference(self, observations: torch.Tensor) -> torch.Tensor:
-        """
-        Deterministic action selection for inference/evaluation.
-
-        Args:
-            observations: (batch, num_obs) tensor of observations
-
-        Returns:
-            actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
-        """
-        actions = self.act(observations, deterministic=True)
-        return actions
-
-    def get_actions_log_prob(self, actions: torch.Tensor) -> torch.Tensor:
-        """
-        Compute log probabilities based on action content, not indices.
-
-        Args:
-            actions: (batch, 4) tensor of actions [leg_idx, dx, dy, swing_duration]
-
-        Returns:
-            log_probs: (batch,) tensor of log probabilities
-        """
-        # If we have cached log probs from the last act() call, use them
-        if (
-            hasattr(self, "_cached_selected_actions")
-            and self._cached_selected_actions is not None
-            and hasattr(self, "_cached_selected_log_probs")
-            and self._cached_selected_log_probs is not None
-            and torch.equal(actions, self._cached_selected_actions)
-        ):
-            return self._cached_selected_log_probs
-
-        # Fallback: find matching actions by content
-        batch_size = actions.shape[0]
-        device = actions.device
-        log_probs = torch.zeros(batch_size, device=device)
-
-        # Add swing durations to cached footstep options for comparison
-        actions_with_durations = torch.cat(
-            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)],
-            dim=-1,
-        )  # (batch, num_options + 1, 4)
-
-        for b in range(batch_size):
-            # Find the option that best matches this action
-            differences = torch.abs(actions_with_durations[b] - actions[b]).sum(dim=-1)
-            best_match_idx = int(torch.argmin(differences).item())
-            log_probs[b] = torch.log(
-                self._cached_action_probs[b, best_match_idx] + 1e-8
-            )
-
-        return log_probs
-
-    @property
-    def action_mean(self):
-        """
-        Mean of the action distribution.
-        For our value-based approach, return the expected action based on probabilities.
-        """
-        if self._cached_action_probs is None:
-            raise RuntimeError(
-                "Action probabilities not computed. Call _ensure_forward_pass() first."
-            )
-
-        # Compute expected action as weighted sum of all options
-        batch_size = self._cached_footstep_options.shape[0]
-
-        # Add swing durations as the 4th dimension
-        actions_with_durations = torch.cat(
-            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)],
-            dim=-1,
-        )  # (batch, num_options + 1, 4)
-
-        # Compute weighted average using probabilities
-        probs = self._cached_action_probs.unsqueeze(-1)  # (batch, num_options + 1, 1)
-        expected_action = (actions_with_durations * probs).sum(dim=1)  # (batch, 4)
-
-        return expected_action
-
-    @property
-    def action_std(self):
-        """
-        Standard deviation of the action distribution.
-        Compute std based on the variance of actions weighted by probabilities.
-        """
-        if self._cached_action_probs is None:
-            raise RuntimeError(
-                "Action probabilities not computed. Call _ensure_forward_pass() first."
-            )
-
-        # Get expected action
-        mean_action = self.action_mean  # (batch, 4)
-
-        # Add swing durations as the 4th dimension
-        actions_with_durations = torch.cat(
-            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)],
-            dim=-1,
-        )  # (batch, num_options + 1, 4)
-
-        # Compute variance
-        probs = self._cached_action_probs.unsqueeze(-1)  # (batch, num_options + 1, 1)
-        mean_expanded = mean_action.unsqueeze(1)  # (batch, 1, 4)
-        variance = (probs * (actions_with_durations - mean_expanded) ** 2).sum(
-            dim=1
-        )  # (batch, 4)
-
-        # Return standard deviation
-        return torch.sqrt(variance + 1e-8)  # Add small epsilon for numerical stability
-
-    @property
-    def entropy(self):
-        """
-        Entropy of the action distribution.
-        """
-        if self._cached_action_probs is None:
-            raise RuntimeError(
-                "Action probabilities not computed. Call _ensure_forward_pass() first."
-            )
-
-        # Compute entropy directly from cached probabilities
-        # entropy = -sum(p * log(p))
-        log_probs = torch.log(
-            self._cached_action_probs + 1e-8
-        )  # Add small epsilon for numerical stability
-        entropy = -(self._cached_action_probs * log_probs).sum(dim=-1)  # (batch,)
-        return entropy
-
-    def reset(self, dones=None):
-        """
-        Reset the cached values. Called between episodes.
-        """
-        self._cached_observations = None  # type: ignore
-        self._cached_footstep_options = None  # type: ignore
-        self._cached_action_values = None  # type: ignore
-        self._cached_swing_durations = None  # type: ignore
-        self._cached_action_probs = None  # type: ignore
-        self._cached_selected_actions = None  # type: ignore
-        self._cached_selected_log_probs = None  # type: ignore
-        self.distribution = None  # type: ignore
+            action_idx = discrete_actions[b].long().item()
+            if action_idx < footstep_options.shape[1]:
+                selected_footsteps[b] = footstep_options[b, action_idx]
+                selected_durations[b] = swing_durations[b, action_idx]
+            # else: keep zero values (no-action)
+        
+        # Flatten footsteps to [batch_size, 12] and concatenate with durations to get [batch_size, 13]
+        continuous_actions = torch.cat([
+            selected_footsteps.view(batch_size, -1),  # flatten to [batch_size, 12]
+            selected_durations.unsqueeze(-1)          # add duration as [batch_size, 1]
+        ], dim=-1)  # final shape: [batch_size, 13]
+        
+        return continuous_actions
