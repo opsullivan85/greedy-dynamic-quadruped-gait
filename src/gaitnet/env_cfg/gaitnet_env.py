@@ -62,7 +62,24 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 10
 
 
-def _make_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
+def _update_controllers(cfg: GaitNetEnvCfg) -> None:
+    """Update the controllers in the environment configuration.
+
+    Args:
+        envcfg (GaitNetEnvCfg): The environment configuration.
+        controllers (VectorPool[sim2real.Sim2RealInterface]): The controllers to set.
+    """
+    controllers: VectorPool[sim2real.Sim2RealInterface] = VectorPool(
+        instances=cfg.scene.num_envs,
+        cls=sim2real.SimInterface,
+        dt=cfg.sim.dt,  # 250 Hz leg PD control
+        iterations_between_mpc=5,  # 50 Hz MPC
+        debug_logging=False,
+    )
+    cfg.robot_controllers = controllers  # type: ignore
+
+
+def make_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
     cfg = GaitNetEnvCfg()
 
     cfg.scene.num_envs = num_envs
@@ -79,30 +96,8 @@ def _make_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
     return cfg
 
 
-def _update_controllers(
-    cfg: GaitNetEnvCfg, num_envs: int
-) -> None:
-    """Update the controllers in the environment configuration.
-
-    Args:
-        envcfg (GaitNetEnvCfg): The environment configuration.
-        controllers (VectorPool[sim2real.Sim2RealInterface]): The controllers to set.
-    """
-    controllers: VectorPool[sim2real.Sim2RealInterface] = VectorPool(
-        instances=num_envs,
-        cls=sim2real.SimInterface,
-        dt=cfg.sim.dt,  # 250 Hz leg PD control
-        iterations_between_mpc=5,  # 50 Hz MPC
-        debug_logging=False,
-    )
-    cfg.robot_controllers = controllers  # type: ignore
-
-
-def get_env(
-    num_envs: int, device: str
-) -> tuple[GaitNetEnvCfg, ManagerBasedRLEnv]:
+def make_env(env_cfg: GaitNetEnvCfg) -> ManagerBasedRLEnv:
     """Get the environment configuration and the environment instance."""
-    env_cfg = _make_env_cfg(num_envs, device)
     env = ManagerBasedRLEnv(cfg=env_cfg)
-    _update_controllers(env_cfg, num_envs)
-    return env_cfg, env
+    _update_controllers(env_cfg)
+    return env

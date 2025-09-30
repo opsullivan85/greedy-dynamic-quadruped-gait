@@ -1,3 +1,4 @@
+from skrl.memories.torch import RandomMemory
 from isaaclab.app import AppLauncher
 import argparse
 
@@ -39,14 +40,19 @@ import multiprocessing
 import signal
 import datetime
 import os
-from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # type: ignore
 from src.gaitnet.gaitnet import GaitNetActorCritic, FootstepOptionGenerator
 import src.simulation.cfg.footstep_scanner_constants as fs
-from rsl_rl.runners import on_policy_runner
-import rsl_rl.modules
-from src.gaitnet.env_cfg.gaitnet_env import get_env
+from src.gaitnet.env_cfg.gaitnet_env import make_env, make_env_cfg
 from src.util import log_exceptions
-from src import get_logger
+from src import get_logger, timestamp, PROJECT_ROOT
+from isaaclab.utils.io import dump_pickle, dump_yaml
+
+from skrl.trainers.torch import SequentialTrainer
+from isaaclab_rl.skrl import SkrlVecEnvWrapper
+from skrl.agents.torch.dqn import DDQN, DDQN_DEFAULT_CONFIG
+from skrl.utils.runner.torch import Runner
+from skrl.envs.wrappers.torch.base import Wrapper
+from skrl.envs.wrappers.torch.isaaclab_envs import IsaacLabWrapper
 
 logger = get_logger()
 
@@ -70,95 +76,71 @@ logger = get_logger()
 
 
 def main():
-    env_cfg, env = get_env(
+    env_cfg = make_env_cfg(
         num_envs=args_cli.num_envs,
         device=args_cli.device,
     )
 
-    # wrap for RL training
-    env = RslRlVecEnvWrapper(env)
+    # instantiate the agent's models
+    models = {}
+    models["q_network"] = ...
+    models["target_q_network"] = ...  # only required during training
 
-    obs_space = env.observation_space["policy"].shape[1]
-    robot_state_dim = obs_space - (4*fs.grid_size[0]*fs.grid_size[1])  # subtract height scan
-    # action_space = env.action_space.shape[1]
-    # 2 per leg
-    num_footstep_candidates = 12
+    # adjust some configuration if necessary
+    cfg_agent = DDQN_DEFAULT_CONFIG.copy()
+    cfg_agent["<KEY>"] = ...
 
-    footstep_option_generator = FootstepOptionGenerator(
-        env=env.unwrapped,
-        num_options=num_footstep_candidates,
-    )
-
-    # hack to get OnPolicyRunner to be able to initiate a GaitNetActorCritic
-    on_policy_runner.__dict__["GaitNetActorCritic"] = GaitNetActorCritic  # type: ignore
-
-    # Create unique experiment name with timestamp
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    experiment_name = f"gaitnet_{timestamp}"
-    
-    # Create unique log directory
-    log_dir = f"./training/gaitnet/runs/{experiment_name}"
-    save_dir = f"./training/gaitnet/checkpoints/{experiment_name}"
-    
-    # Create directories if they don't exist
+    # setup logging directories
+    log_dir = PROJECT_ROOT / "training" / "gaitnet" / "runs" / timestamp
+    save_dir = PROJECT_ROOT / "training" / "gaitnet" / "checkpoints" / timestamp
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(save_dir, exist_ok=True)
+    # dump the configuration into log-directory
+    dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
+    # dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+    dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
+    # dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
 
-    # Prepare config dict for OnPolicyRunner
-    train_cfg = {
-        "algorithm": {
-            "class_name": "PPO",
-            "clip_param": 0.2,
-            "num_learning_epochs": 5,
-            "num_mini_batches": 4,
-            "value_loss_coef": 0.5,
-            "entropy_coef": 0.01,
-            "learning_rate": 1e-4,
-            "max_grad_norm": 1.0,
-            "use_clipped_value_loss": True,
-            "gamma": 0.99,
-            "lam": 0.95,
-        },
-        "policy": {
-            "class_name": "GaitNetActorCritic",
-            "robot_state_dim": robot_state_dim,
-            "num_footstep_options": num_footstep_candidates,
-            "hidden_dims": [128, 128],
-            "get_footstep_options": footstep_option_generator.get_footstep_options,
-        },
-        "log_dir": log_dir,
-        "num_steps_per_env": 500,  # ~2 episodes per iteration (episode = 250 steps)
-        "save_interval": 10,
-        "empirical_normalization": False,
-        "logger": "tensorboard",  # Explicitly set TensorBoard as logger
-    }
+    # set the IO descriptors output directory
+    env_cfg.export_io_descriptors = args_cli.export_io_descriptors
+    env_cfg.io_descriptors_output_dir = str(log_dir)
 
-    runner = on_policy_runner.OnPolicyRunner(
+    # setup env
+    env = make_env(env_cfg)  # type: ignore
+    env: IsaacLabWrapper = SkrlVecEnvWrapper(env, ml_framework=args_cli.ml_framework)  # type: ignore
+
+    memory_size = 24  # TODO: this should match the agent rollout length
+    memory = RandomMemory(memory_size, device=env.device)  # only required during training
+
+    # instantiate the agent
+    agent = DDQN(models=models,
+                memory=memory,  # only required during training
+                cfg=cfg_agent,
+                observation_space=env.observation_space,
+                action_space=env.action_space,
+                device=env.device)
+
+    # load checkpoint (if specified)
+    resume_path = args_cli.checkpoint if args_cli.checkpoint else None
+    if resume_path:
+        logger.info(f"loading model checkpoint from: {resume_path}")
+        agent.load(resume_path)
+
+
+    # configure and instantiate the skrl runner
+    # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
+    # runner = Runner(env, agent_cfg)
+
+    # Sequential trainer
+    # https://skrl.readthedocs.io/en/latest/api/trainers/sequential.html
+    trainer = SequentialTrainer(
         env=env,
-        train_cfg=train_cfg,
-        log_dir=train_cfg["log_dir"],
-        device=args_cli.device,
+        agents=[agent],
     )
 
-    # Resume from checkpoint if specified
-    if args_cli.resume is not None:
-        logger.info(f"Loading checkpoint from {args_cli.resume}")
-        runner.load(args_cli.resume)
+    trainer.train()
 
-    logger.info("Starting training...")
-    
-    # Let the runner handle the entire training loop
-    # This ensures proper TensorBoard logging continuity
-    try:
-        runner.learn(num_learning_iterations=args_cli.max_iterations)
-        logger.info("Training completed successfully")
-    except KeyboardInterrupt:
-        logger.info("Training interrupted by user")
-    except Exception as e:
-        logger.error(f"Training failed with error: {e}")
-        raise
-
-    logger.info("Closing environments")
+    # close the simulator
     env.close()
 
 
