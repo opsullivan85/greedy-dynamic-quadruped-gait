@@ -537,38 +537,53 @@ class GaitNetActorCritic(ActorCritic):
         Returns:
             log_probs: (batch,) tensor of log probabilities
         """
-        # If we have cached log probs from the last act() call, use them
+        # Quick path: if actions match cached selected actions exactly
         if (
-            hasattr(self, "_cached_selected_actions")
-            and self._cached_selected_actions is not None
-            and hasattr(self, "_cached_selected_log_probs")
-            and self._cached_selected_log_probs is not None
-            and torch.equal(actions, self._cached_selected_actions)
+            self._cached_selected_actions is not None
+            and actions.shape == self._cached_selected_actions.shape
+            and actions.device == self._cached_selected_actions.device
+            and torch.allclose(actions, self._cached_selected_actions, rtol=1e-5, atol=1e-8)
         ):
             return self._cached_selected_log_probs
 
-        # Fallback: find matching actions by content
+        # Vectorized matching on footstep content only (ignore duration)
         batch_size = actions.shape[0]
         device = actions.device
-        log_probs = torch.zeros(batch_size, device=device)
-
-        # Match only on [leg_idx, dx, dy], ignore duration
-        # because it will change during training
-        footstep_only = actions[:, :3]  # (batch, 3)
-        options_only = self._cached_footstep_options  # (batch, num_options+1, 3)
-
-        for b in range(batch_size):
-            differences = torch.abs(options_only[b] - footstep_only[b]).sum(dim=-1)
-            min_diff = differences.min()
-            if min_diff > 1e-4:  # threshold for "match"
-                logger.warning(f"Action matching failed! Min difference: {min_diff}")
-
-            best_match_idx = int(torch.argmin(differences).item())
-            
-            # Now use the CURRENT duration prediction, not the old one
-            log_probs[b] = torch.log(self._cached_action_probs[b, best_match_idx] + 1e-8)
-
-
+        
+        # Extract footstep part: [leg_idx, dx, dy]
+        actions_footstep = actions[:, :3]  # (batch, 3)
+        options_footstep = self._cached_footstep_options  # (batch, num_options+1, 3)
+        
+        # Compute pairwise differences: (batch, num_options+1, 3)
+        # Expand dims for broadcasting: (batch, 1, 3) vs (batch, num_options+1, 3)
+        differences = torch.abs(
+            actions_footstep.unsqueeze(1) - options_footstep
+        )  # (batch, num_options+1, 3)
+        
+        # Sum across feature dimension to get total difference per option
+        total_diff = differences.sum(dim=-1)  # (batch, num_options+1)
+        
+        # Find best matching option for each batch element
+        best_match_indices = torch.argmin(total_diff, dim=-1)  # (batch,)
+        
+        # Optional: Check if matching failed (for debugging)
+        min_diffs = total_diff[torch.arange(batch_size, device=device), best_match_indices]
+        if torch.any(min_diffs > 1e-4):
+            num_failed = (min_diffs > 1e-4).sum().item()
+            max_diff = min_diffs.max().item()
+            logger.warning(
+                f"Action matching failed for {num_failed}/{batch_size} samples! "
+                f"Max difference: {max_diff:.6f}"
+            )
+        
+        # Gather log probabilities using matched indices
+        log_probs = torch.log(
+            self._cached_action_probs[
+                torch.arange(batch_size, device=device), 
+                best_match_indices
+            ] + 1e-8
+        )
+        
         return log_probs
 
     @property
