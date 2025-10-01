@@ -108,6 +108,7 @@ def main():
     train_cfg = {
         "algorithm": {
             "class_name": "PPO",
+            "schedule": "fixed",  # we don't support adaptive
             "clip_param": 0.2,
             "num_learning_epochs": 5,
             "num_mini_batches": 4,

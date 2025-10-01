@@ -82,8 +82,10 @@ class FootstepOptionGenerator:
         flat_cost_map = flat_cost_map.reshape(
             cost_map.shape[0], -1
         )  # (num_envs, 4*H*W)
+        # technically there is no need to sort here, but
+        # it will guarantee determinism
         topk_values, topk_flat_indices = torch.topk(
-            flat_cost_map, num_options, largest=False, sorted=False
+            flat_cost_map, num_options, largest=False, sorted=True
         )  # (num_envs, num_options)
 
         # unravel indices to (leg, idx, idy)
@@ -478,45 +480,40 @@ class GaitNetActorCritic(ActorCritic):
             actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
                     For no-action: [NO_STEP, 0, 0, 0]
         """
-        # Ensure forward pass is computed
         self._ensure_forward_pass(observations)
-
+        
         batch_size = observations.shape[0]
-        device = observations.device
-
-        # Prepare actions with durations for selection
+        
+        # Prepare actions with durations
         actions_with_durations = torch.cat(
             [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)],
             dim=-1,
         )  # (batch, num_options + 1, 4)
-
-        # Content-based selection for each batch element
-        selected_actions = torch.zeros((batch_size, 4), device=device)
-        selected_log_probs = torch.zeros(batch_size, device=device)
-
-        for b in range(batch_size):
-            values_b = self._cached_action_values[b]  # (num_options + 1,)
-            probs_b = self._cached_action_probs[b]  # (num_options + 1,)
-
-            if kwargs.get("deterministic", False):
-                # Select option with highest value (deterministic)
-                best_idx = int(torch.argmax(values_b).item())
-            else:
-                # Sample based on probabilities (stochastic)
-                best_idx = int(torch.multinomial(probs_b, 1).item())
-
-            # Get the selected action
-            selected_actions[b] = actions_with_durations[b, best_idx]
-            selected_log_probs[b] = torch.log(
-                probs_b[best_idx] + 1e-8
-            )  # Add small epsilon for numerical stability
-
-        # Cache for log_prob computation
+        
+        if kwargs.get("deterministic", False):
+            # Vectorized deterministic selection
+            best_indices = self._cached_action_values.argmax(dim=1)  # (batch,)
+        else:
+            # Vectorized stochastic sampling
+            best_indices = torch.multinomial(self._cached_action_probs, 1).squeeze(1)  # (batch,)
+        
+        # Gather selected actions: (batch, 4)
+        selected_actions = actions_with_durations[
+            torch.arange(batch_size, device=observations.device), best_indices
+        ]
+        
+        # Compute log probs: (batch,)
+        selected_log_probs = torch.log(
+            self._cached_action_probs[
+                torch.arange(batch_size, device=observations.device), best_indices
+            ] + 1e-8
+        )
+        
+        # Cache for efficiency
         self._cached_selected_actions = selected_actions.clone()
         self._cached_selected_log_probs = selected_log_probs
-
+        
         return selected_actions
-
     def act_inference(self, observations: torch.Tensor) -> torch.Tensor:
         """
         Deterministic action selection for inference/evaluation.
@@ -555,77 +552,36 @@ class GaitNetActorCritic(ActorCritic):
         device = actions.device
         log_probs = torch.zeros(batch_size, device=device)
 
-        # Add swing durations to cached footstep options for comparison
-        actions_with_durations = torch.cat(
-            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)],
-            dim=-1,
-        )  # (batch, num_options + 1, 4)
+        # Match only on [leg_idx, dx, dy], ignore duration
+        # because it will change during training
+        footstep_only = actions[:, :3]  # (batch, 3)
+        options_only = self._cached_footstep_options  # (batch, num_options+1, 3)
 
         for b in range(batch_size):
-            # Find the option that best matches this action
-            differences = torch.abs(actions_with_durations[b] - actions[b]).sum(dim=-1)
+            differences = torch.abs(options_only[b] - footstep_only[b]).sum(dim=-1)
+            min_diff = differences.min()
+            if min_diff > 1e-4:  # threshold for "match"
+                logger.warning(f"Action matching failed! Min difference: {min_diff}")
+
             best_match_idx = int(torch.argmin(differences).item())
-            log_probs[b] = torch.log(
-                self._cached_action_probs[b, best_match_idx] + 1e-8
-            )
+            
+            # Now use the CURRENT duration prediction, not the old one
+            log_probs[b] = torch.log(self._cached_action_probs[b, best_match_idx] + 1e-8)
+
 
         return log_probs
 
     @property
     def action_mean(self):
+        """ this model is not compatiable with adaptive schedules
         """
-        Mean of the action distribution.
-        For our value-based approach, return the expected action based on probabilities.
-        """
-        if self._cached_action_probs is None:
-            raise RuntimeError(
-                "Action probabilities not computed. Call _ensure_forward_pass() first."
-            )
-
-        # Compute expected action as weighted sum of all options
-        batch_size = self._cached_footstep_options.shape[0]
-
-        # Add swing durations as the 4th dimension
-        actions_with_durations = torch.cat(
-            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)],
-            dim=-1,
-        )  # (batch, num_options + 1, 4)
-
-        # Compute weighted average using probabilities
-        probs = self._cached_action_probs.unsqueeze(-1)  # (batch, num_options + 1, 1)
-        expected_action = (actions_with_durations * probs).sum(dim=1)  # (batch, 4)
-
-        return expected_action
+        return torch.zeros(1)
 
     @property
     def action_std(self):
+        """ this model is not compatiable with adaptive schedules
         """
-        Standard deviation of the action distribution.
-        Compute std based on the variance of actions weighted by probabilities.
-        """
-        if self._cached_action_probs is None:
-            raise RuntimeError(
-                "Action probabilities not computed. Call _ensure_forward_pass() first."
-            )
-
-        # Get expected action
-        mean_action = self.action_mean  # (batch, 4)
-
-        # Add swing durations as the 4th dimension
-        actions_with_durations = torch.cat(
-            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)],
-            dim=-1,
-        )  # (batch, num_options + 1, 4)
-
-        # Compute variance
-        probs = self._cached_action_probs.unsqueeze(-1)  # (batch, num_options + 1, 1)
-        mean_expanded = mean_action.unsqueeze(1)  # (batch, 1, 4)
-        variance = (probs * (actions_with_durations - mean_expanded) ** 2).sum(
-            dim=1
-        )  # (batch, 4)
-
-        # Return standard deviation
-        return torch.sqrt(variance + 1e-8)  # Add small epsilon for numerical stability
+        return torch.zeros(1)
 
     @property
     def entropy(self):
