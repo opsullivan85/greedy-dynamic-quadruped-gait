@@ -236,8 +236,16 @@ class Gaitnet(nn.Module):
     def forward(
         self,
         obs: torch.Tensor,
+        footstep_options: torch.Tensor,
+        footstep_costs: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
+        """Q(s, a, c) -> v, d
+        where s is robot state, a is footstep option, c is footstep cost
+        v is value, d is swing duration
+
+        a and c should include a no-action option
+        no_action_option = [NO_STEP, 0, 0], cost = inf
+
         Forward pass to compute values and swing durations for all footstep options.
 
         Args:
@@ -260,7 +268,7 @@ class Gaitnet(nn.Module):
         no_action_option[:, :, 0] = NO_STEP  # leg_idx = NO_STEP
 
         # prepare footstep options
-        footstep_options, footstep_costs = self.get_footstep_options(obs)
+        # footstep_options, footstep_costs = self.get_footstep_options(obs)
         # add no-action option to the list
         footstep_options = torch.cat(
             [footstep_options, no_action_option],
@@ -351,6 +359,29 @@ class Gaitnet(nn.Module):
         # logger.info(f"value: {all_values[0].detach().cpu().numpy().tolist()}")
 
         return footstep_options, all_values, all_durations
+    
+
+class GaitnetDDQNWrapper(nn.Module):
+    """Wrapper to make Gaitnet compatible with DDQN agents."""
+    def __init__(self, gaitnet: Gaitnet) -> None:
+        self.gaitnet = gaitnet
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        """`Q(s*)->{v1, ... vn}` for all footstep options.
+        where `s* = s + a1 + ... + an` (s plus all footstep options)
+        and actions contain their expected cost from ContactNet.
+
+        Args:
+            obs (torch.Tensor): The observation tensor.
+
+        Returns:
+            torch.Tensor: Q-values for all footstep options.
+                Note that this differs from the standard DDQN output which outputs values
+                for each discrete action directly. We embed the action information in the observation
+                and only output the values for those actions.
+        """
+        pass
+
 
 
 class GaitNetActorCritic(ActorCritic):
