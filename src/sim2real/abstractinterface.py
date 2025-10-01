@@ -52,6 +52,8 @@ class Sim2RealInterface(ABC):
     ):
         """initiates a footstep for the specified leg at the specified location
 
+        TODO: add height in here
+
         Args:
             leg (int): Index of the leg (0-3)
                 in FR, FL, RR, RL order

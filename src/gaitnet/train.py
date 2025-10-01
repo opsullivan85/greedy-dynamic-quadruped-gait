@@ -82,7 +82,7 @@ def main():
     robot_state_dim = obs_space - (4*fs.grid_size[0]*fs.grid_size[1])  # subtract height scan
     # action_space = env.action_space.shape[1]
     # 2 per leg
-    num_footstep_candidates = 12
+    num_footstep_candidates = 16
 
     footstep_option_generator = FootstepOptionGenerator(
         env=env.unwrapped,
@@ -128,8 +128,8 @@ def main():
             "get_footstep_options": footstep_option_generator.get_footstep_options,
         },
         "log_dir": log_dir,
-        "num_steps_per_env": 500,  # ~2 episodes per iteration (episode = 250 steps)
-        "save_interval": 10,
+        "num_steps_per_env": 1000,  # ~2 episodes per batch (episode = 10s = 500 iterations)
+        "save_interval": 5,
         "empirical_normalization": False,
         "logger": "tensorboard",  # Explicitly set TensorBoard as logger
     }
