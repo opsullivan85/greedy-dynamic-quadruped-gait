@@ -54,6 +54,6 @@ class TerminationsCfg:
     )
     terrain_out_of_bounds = DoneTerm(
         func=vmdp.terrain_out_of_bounds,
-        params={"asset_cfg": SceneEntityCfg("robot"), "distance_buffer": 0.1},
+        params={"asset_cfg": SceneEntityCfg("robot"), "distance_buffer": 0.5},
         time_out=True,
     )

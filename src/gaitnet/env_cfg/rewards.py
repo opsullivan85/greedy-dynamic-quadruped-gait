@@ -27,7 +27,7 @@ class RewardsCfg:
 
     # rewards
     alive = RewTerm(func=mdp.is_alive, weight=0.2)
-    a_foot_in_swing = RewTerm(func=a_foot_in_swing, weight=0.25)
+    a_foot_in_swing = RewTerm(func=a_foot_in_swing, weight=0.0)
     xy_tracking = RewTerm(
         func=mdp.track_lin_vel_xy_exp,
         weight=0.5,
