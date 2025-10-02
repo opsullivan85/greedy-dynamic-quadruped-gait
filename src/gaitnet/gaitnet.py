@@ -53,7 +53,7 @@ class FootstepOptionGenerator:
 
         # require minimum number leg to be in contact
         # by setting all costs to inf if not enough legs in contact
-        min_legs_in_contact = 2
+        min_legs_in_contact = 1
         num_legs_in_contact = contact_states.sum(dim=1)  # (num_envs,)
         contact_limit = num_legs_in_contact <= min_legs_in_contact  # (num_envs,)
         masked_cost_maps = torch.where(

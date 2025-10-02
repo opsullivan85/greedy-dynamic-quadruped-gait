@@ -48,7 +48,7 @@ class TerminationsCfg:
     foot_below_ground = DoneTerm(
         func=height_below_minimum,
         params={
-            "minimum_height": 0.0,
+            "minimum_height": -0.05,
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
         },
     )
