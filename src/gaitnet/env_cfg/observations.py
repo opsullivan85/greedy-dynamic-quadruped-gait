@@ -116,11 +116,17 @@ def cspace_height_scan(
     height_scan = mdp.height_scan(env=env, sensor_cfg=sensor_cfg, offset=offset)
     height_scan = height_scan.reshape((-1, *real_grid_size))
 
-    # pool the height scan to match the desired grid size
-    kernel_size = 2 * fs.upscale_factor - 1
-    stride = fs.upscale_factor
-    heights_pooled = F.max_pool2d(height_scan, kernel_size=kernel_size, stride=stride)
-    heights_pooled = heights_pooled.reshape(heights_pooled.shape[0], -1)
+    if fs.upscale_factor == 1:
+        heights_pooled = height_scan
+    else:
+        # pool the height scan to match the desired grid size
+        kernel_size = 2 * fs.upscale_factor - 1
+        stride = fs.upscale_factor
+        # note that the height scan has the opposite values to what you would expect
+        # so max pooling gets the lowest height in the region
+        heights_pooled = F.max_pool2d(height_scan, kernel_size=kernel_size, stride=stride)
+    
+    heights_pooled = heights_pooled.reshape(height_scan.shape[0], -1)
 
     # replace any -inf or inf with 1.0 (this roughly corresponds to a void in the terrain)
     heights_pooled[heights_pooled == -float("inf")] = 1.0

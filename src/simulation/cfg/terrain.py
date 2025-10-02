@@ -90,8 +90,8 @@ VoidTerrainImporterCfg: Callable[[], TerrainImporterCfg] = lambda: TerrainImport
     terrain_type="generator",
     # https://isaac-sim.github.io/IsaacLab/v2.1.0/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg
     terrain_generator=TerrainGeneratorCfg(
-        size=(6, 6),
-        horizontal_scale=0.015,
+        size=(5, 5),
+        horizontal_scale=0.025,
         slope_threshold=0,
         sub_terrains={
             "holes": HfVoidTerrainCfg(

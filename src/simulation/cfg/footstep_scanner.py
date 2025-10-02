@@ -4,7 +4,10 @@ from isaaclab.sensors import RayCasterCfg, patterns
 from src.simulation.cfg.footstep_scanner_constants import grid_resolution, grid_size, upscale_factor  # type: ignore
 
 real_grid_resolution = grid_resolution / upscale_factor
-real_grid_size = (grid_size[0] * upscale_factor + 1, grid_size[1] * upscale_factor + 1)
+if upscale_factor == 1:
+    real_grid_size = grid_size
+else:
+    real_grid_size = (grid_size[0] * upscale_factor + 1, grid_size[1] * upscale_factor + 1)
 
 _hip_names = ["FL_hip", "FR_hip", "RL_hip", "RR_hip"]
 
