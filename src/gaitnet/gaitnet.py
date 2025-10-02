@@ -51,12 +51,13 @@ class FootstepOptionGenerator:
             masked_cost_maps,
         )
 
-        # require atleast 1 leg to be in contact
-        # by setting all costs to inf if only 1 leg is in contact
+        # require minimum number leg to be in contact
+        # by setting all costs to inf if not enough legs in contact
+        min_legs_in_contact = 2
         num_legs_in_contact = contact_states.sum(dim=1)  # (num_envs,)
-        only_one_contact = num_legs_in_contact <= 2  # (num_envs,)
+        contact_limit = num_legs_in_contact <= min_legs_in_contact  # (num_envs,)
         masked_cost_maps = torch.where(
-            only_one_contact.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1),
+            contact_limit.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1),
             torch.tensor(float("inf"), device=cost_map.device),
             masked_cost_maps,
         )

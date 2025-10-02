@@ -38,6 +38,9 @@ _height_scanner_settings = {
                 (real_grid_size[0] - 1) * real_grid_resolution,
                 (real_grid_size[1] - 1) * real_grid_resolution,
             ),
+            # importantly, this is the ordering that 
+            # contact-net expects (was used in training data generation)
+            ordering="yx",
         ),
         "debug_vis": True,
         "mesh_prim_paths": ["/World/ground"],

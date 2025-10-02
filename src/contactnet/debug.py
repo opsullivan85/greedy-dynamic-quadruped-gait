@@ -5,6 +5,7 @@ from mpl_toolkits.axes_grid1 import AxesGrid
 from src import PROJECT_ROOT
 from datetime import datetime
 import src.simulation.cfg.footstep_scanner_constants as fs
+from random import randint
 
 from src import get_logger
 logger = get_logger()
@@ -137,7 +138,7 @@ def view_footstep_cost_map(
         plt.show(block=True)
     else:
         timestamp = datetime.now().isoformat(timespec="microseconds").replace(".", "-").replace(":", "-")
-        image_file = image_dir / f"{timestamp}_cost-map.png"
+        image_file = image_dir / f"{timestamp}_cost-map_{randint(0, 99999)}.png"
         plt.savefig(image_file)
         logger.debug(f"saved cost map figure to {image_file}")
         plt.close(f)
