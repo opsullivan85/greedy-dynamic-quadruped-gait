@@ -352,6 +352,10 @@ class Gaitnet(nn.Module):
         #     pass
         # logger.info(f"value: {all_values[0].detach().cpu().numpy().tolist()}")
 
+        if torch.isnan(all_values).any():
+            # lord help you...
+            logger.error("NaN in all_values!")
+
         return footstep_options, all_values, all_durations
 
 
@@ -530,6 +534,9 @@ class GaitNetActorCritic(ActorCritic):
     def get_actions_log_prob(self, actions: torch.Tensor) -> torch.Tensor:
         """
         Compute log probabilities based on action content, not indices.
+        
+        NOTE: PPO calls act() with the mini-batch observations BEFORE calling this method,
+        so the cache should be valid for the current mini-batch.
 
         Args:
             actions: (batch, 4) tensor of actions [leg_idx, dx, dy, swing_duration]

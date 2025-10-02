@@ -3,6 +3,7 @@ from isaaclab.assets import ArticulationData, RigidObject
 from isaaclab.envs import ManagerBasedRLEnv, mdp
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.managers import SceneEntityCfg
+import isaaclab_tasks.manager_based.locomotion.velocity.mdp as vmdp  # type: ignore
 from isaaclab.utils import configclass
 import math
 
@@ -50,4 +51,9 @@ class TerminationsCfg:
             "minimum_height": 0.0,
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
         },
+    )
+    terrain_out_of_bounds = DoneTerm(
+        func=vmdp.terrain_out_of_bounds,
+        params={"asset_cfg": SceneEntityCfg("robot"), "distance_buffer": 0.1},
+        time_out=True,
     )

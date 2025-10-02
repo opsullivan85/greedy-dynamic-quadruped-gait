@@ -100,8 +100,8 @@ VoidTerrainImporterCfg: Callable[[], TerrainImporterCfg] = lambda: TerrainImport
             ),
         },
         curriculum=True,
-        num_rows=3,
-        num_cols=3,
+        num_rows=5,
+        num_cols=5,
         difficulty_range=(0.0, 0.5),
     ),
     physics_material=sim_utils.RigidBodyMaterialCfg(

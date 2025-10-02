@@ -121,6 +121,10 @@ def cspace_height_scan(
     stride = fs.upscale_factor
     heights_pooled = F.max_pool2d(height_scan, kernel_size=kernel_size, stride=stride)
     heights_pooled = heights_pooled.reshape(heights_pooled.shape[0], -1)
+
+    # replace any -inf or inf with 1.0 (this roughly corresponds to a void in the terrain)
+    heights_pooled[heights_pooled == -float("inf")] = 1.0
+    heights_pooled[heights_pooled == float("inf")] = 1.0
     return heights_pooled
 
 
