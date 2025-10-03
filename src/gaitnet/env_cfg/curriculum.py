@@ -9,16 +9,16 @@ from isaaclab.envs import mdp
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    # in the beginning we reward always moving a foot to teach
-    # the model when to use/not the no-op action. Once it has
-    # learned this, we remove the reward.
-    remove_foot_in_swing_reward = CurrTerm(
-        func=mdp.modify_reward_weight,  # type: ignore
-        params={
-            "term_name": "a_foot_in_swing",
-            "weight": 0,
-            "num_steps": 25*100000,
-        },
-    )
+    # # in the beginning we reward always moving a foot to teach
+    # # the model when to use/not the no-op action. Once it has
+    # # learned this, we remove the reward.
+    # remove_foot_in_swing_reward = CurrTerm(
+    #     func=mdp.modify_reward_weight,  # type: ignore
+    #     params={
+    #         "term_name": "a_foot_in_swing",
+    #         "weight": 0,
+    #         "num_steps": 25*100000,
+    #     },
+    # )
 
     terrain_levels = CurrTerm(func=vmdp.terrain_levels_vel)
