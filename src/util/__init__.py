@@ -5,4 +5,4 @@ logger.debug("initialized")
 
 from .log_exceptions import log_exceptions
 from .vectorpool import VectorPool
-from .data_logging import data_logger, data_dir, DataType
+from .data_logging import save_img
