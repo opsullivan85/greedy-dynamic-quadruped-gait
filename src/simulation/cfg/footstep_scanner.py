@@ -1,13 +1,7 @@
 from typing import Callable
 
 from isaaclab.sensors import RayCasterCfg, patterns
-from src.simulation.cfg.footstep_scanner_constants import grid_resolution, grid_size, upscale_factor  # type: ignore
-
-real_grid_resolution = grid_resolution / upscale_factor
-if upscale_factor == 1:
-    real_grid_size = grid_size
-else:
-    real_grid_size = (grid_size[0] * upscale_factor + 1, grid_size[1] * upscale_factor + 1)
+from src.constants import _footstep_scanner_grid_resolution, _footstep_scanner_grid_size
 
 _hip_names = ["FL_hip", "FR_hip", "RL_hip", "RR_hip"]
 
@@ -33,10 +27,10 @@ _height_scanner_settings = {
         "update_period": 0.00,  # every sim step
         "ray_alignment": "yaw",
         "pattern_cfg": patterns.GridPatternCfg(
-            resolution=real_grid_resolution,
+            resolution=_footstep_scanner_grid_resolution,
             size=(
-                (real_grid_size[0] - 1) * real_grid_resolution,
-                (real_grid_size[1] - 1) * real_grid_resolution,
+                (_footstep_scanner_grid_size[0] - 1) * _footstep_scanner_grid_resolution,
+                (_footstep_scanner_grid_size[1] - 1) * _footstep_scanner_grid_resolution,
             ),
             # importantly, this is the ordering that 
             # contact-net expects (was used in training data generation)

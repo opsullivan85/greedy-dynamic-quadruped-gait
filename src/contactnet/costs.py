@@ -83,7 +83,7 @@ class SimpleIntegrator(RunningCost):
             else self.name
         )
         view_footstep_cost_map(
-            cost.reshape((4, fs.grid_size[0], fs.grid_size[1])), title=title, **kwargs
+            cost.reshape((4, fs._grid_size[0], fs._grid_size[1])), title=title, **kwargs
         )
 
 
@@ -111,7 +111,7 @@ class SimpleTerminalCost(TerminalCost):
         view_footstep_cost_map(
             self.previous_terminal_cost.cpu()
             .numpy()
-            .reshape((4, fs.grid_size[0], fs.grid_size[1])),
+            .reshape((4, fs._grid_size[0], fs._grid_size[1])),
             title=title,
             **kwargs,
         )
@@ -160,7 +160,7 @@ class BallanceFootCosts(RunningCost):
             else self.name
         )
         view_footstep_cost_map(
-            cost.reshape((4, fs.grid_size[0], fs.grid_size[1])), title=title, **kwargs
+            cost.reshape((4, fs._grid_size[0], fs._grid_size[1])), title=title, **kwargs
         )
 
 class ControlErrorCost(RunningCost):
@@ -222,7 +222,7 @@ class ControlErrorCost(RunningCost):
         view_footstep_cost_map(
             self.previous_terminal_cost.cpu()
             .numpy()
-            .reshape((4, fs.grid_size[0], fs.grid_size[1])),
+            .reshape((4, fs._grid_size[0], fs._grid_size[1])),
             title=title,
             **kwargs,
         )

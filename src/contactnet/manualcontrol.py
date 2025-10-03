@@ -172,8 +172,8 @@ def main():
             foot, dx_idx, dy_idx = best_idx
             foot = np.asarray([foot])
             # convert dx_idx, dy_idx to dx, dy based off of fs.grid_resolution and fs.grid_size
-            dx = (dx_idx - fs.grid_size[0] // 2) * fs.grid_resolution
-            dy = (dy_idx - fs.grid_size[1] // 2) * fs.grid_resolution
+            dx = (dx_idx - fs._grid_size[0] // 2) * fs._grid_resolution
+            dy = (dy_idx - fs._grid_size[1] // 2) * fs._grid_resolution
             hip_offset = np.asarray([[dx, dy]])
             duration = np.asarray([0.2])  # seconds
             controllers.call(

@@ -516,7 +516,7 @@ class CostMapGenerator:
         # assume the first 18 elements of obs are the same as flatten_state
         x = obs[:, :18]
 
-        costmaps = self.model(x).reshape(-1, 4, fs.grid_size[0], fs.grid_size[1])
+        costmaps = self.model(x).reshape(-1, 4, fs._grid_size[0], fs._grid_size[1])
 
         return costmaps
 

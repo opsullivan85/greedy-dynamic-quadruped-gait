@@ -65,8 +65,8 @@ def view_footstep_cost_map(
         ax.set_title(titles[i])
         # only show ticks on the left and bottom
         if i in [2, 3]:
-            x_ticks = [x for x in range(fs.grid_size[0])]
-            x_labels = [fs.grid_resolution * (x - fs.grid_size[0] // 2) for x in range(fs.grid_size[0])]
+            x_ticks = [x for x in range(fs._grid_size[0])]
+            x_labels = [fs._grid_resolution * (x - fs._grid_size[0] // 2) for x in range(fs._grid_size[0])]
             x_labels = [f"{xl:.2f}" for xl in x_labels]
             x_ticks = x_ticks[::2]
             x_labels = x_labels[::2]
@@ -74,8 +74,8 @@ def view_footstep_cost_map(
         else:
             ax.set_xticks([])
         if i in [0, 2]:
-            y_ticks = [y for y in range(fs.grid_size[1])]
-            y_labels = [fs.grid_resolution * (y - fs.grid_size[1] // 2) for y in range(fs.grid_size[1])]
+            y_ticks = [y for y in range(fs._grid_size[1])]
+            y_labels = [fs._grid_resolution * (y - fs._grid_size[1] // 2) for y in range(fs._grid_size[1])]
             y_labels = [f"{yl:.2f}" for yl in y_labels]
             y_ticks = y_ticks[::2]
             y_labels = y_labels[::2]

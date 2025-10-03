@@ -14,12 +14,12 @@ from isaaclab.envs.utils.io_descriptors import (
     record_shape,
 )
 import src.simulation.cfg.footstep_scanner_constants as fs
-from src.simulation.cfg.footstep_scanner import real_grid_size
 import torch.nn.functional as F
 from src.util.vectorpool import VectorPool
 from src.sim2real.abstractinterface import Sim2RealInterface
 from src import get_logger
 from src.util.data_logging import save_img
+import src.constants as const
 
 logger = get_logger()
 
@@ -115,34 +115,19 @@ def cspace_height_scan(
     The provided offset (Defaults to 0.5) is subtracted from the returned values.
     """
     height_scan = mdp.height_scan(env=env, sensor_cfg=sensor_cfg, offset=offset)
-    height_scan = height_scan.reshape((-1, *real_grid_size))
+    # reshape to (N, H, W)
+    height_scan = height_scan.reshape((-1, *footstep_scanner.grid_size))
 
-    # save_img(height_scan[0].cpu().numpy(), name=f"{sensor_cfg.name}_raw_height_scan", cmap_limits=(-1, 1), gridlines=True)
+    # apply cspace dialation
+    height_scan = F.max_pool2d(height_scan, kernel_size=3, stride=1, padding=1)
 
-    if fs.upscale_factor == 1:
-        heights_pooled = height_scan
-    else:
-        # expand the size of holes
-        height_scan = F.max_pool2d(height_scan, kernel_size=3, stride=1, padding=1)
-        # save_img(height_scan[0].cpu().numpy(), name=f"{sensor_cfg.name}_expanded_height_scan", cmap_limits=(-1, 1), gridlines=True)
 
-        heights_pooled = height_scan[:, 1::2, 1::2]
-        # # pool the height scan to match the desired grid size
-        # # kernel_size = 2 * fs.upscale_factor - 1
-        # kernel_size = 1
-        # stride = fs.upscale_factor
-        # padding = -1
-        # # note that the height scan has the opposite values to what you would expect
-        # # so max pooling gets the lowest height in the region
-        # heights_pooled = F.max_pool2d(height_scan, kernel_size=kernel_size, stride=stride, padding=padding)
-
-    # save_img(heights_pooled[0].cpu().numpy(), name=f"{sensor_cfg.name}_pooled_height_scan", cmap_limits=(-1, 1), gridlines=True)
-    heights_pooled = heights_pooled.reshape(height_scan.shape[0], -1)
-
+    # flatten to (N, H*W)
+    height_scan = height_scan.reshape(height_scan.shape[0], -1)
     # replace any -inf or inf with 1.0 (this roughly corresponds to a void in the terrain)
-    heights_pooled[heights_pooled == -float("inf")] = 1.0
-    heights_pooled[heights_pooled == float("inf")] = 1.0
-    return heights_pooled
+    height_scan[height_scan == -float("inf")] = 1.0
+    height_scan[height_scan == float("inf")] = 1.0
+    return height_scan
 
 
 @configclass
@@ -229,11 +214,11 @@ def get_terrain_mask(
     0 indicates invalid terrain (too high or too low)
     1 indicates valid terrain
     """
-    terrain_terms = fs.grid_size[0] * fs.grid_size[1] * 4
+    terrain_terms = fs._grid_size[0] * fs._grid_size[1] * 4
     terrain_obs = obs[:, -terrain_terms:]
     # reshape to (N, 4, H, W)
     terrain_obs = terrain_obs.reshape(
-        terrain_obs.shape[0], 4, fs.grid_size[0], fs.grid_size[1]
+        terrain_obs.shape[0], 4, fs._grid_size[0], fs._grid_size[1]
     )
     # mask out values outside of allowed height range
     max_height, min_height = valid_height_range
