@@ -66,6 +66,14 @@ def _splitmix64(x: torch.Tensor) -> torch.Tensor:
     x = x ^ (x >> 31)
     return x
 
+def _mix32(x: torch.Tensor) -> torch.Tensor:
+    """Cheap 32-bit integer mix function, vectorized on GPU."""
+    x = (x ^ (x >> 17)) * 0xED5AD4BB & 0xFFFFFFFF
+    x = (x ^ (x >> 11)) * 0xAC4C1B51 & 0xFFFFFFFF
+    x = (x ^ (x >> 15)) * 0x31848BAB & 0xFFFFFFFF
+    x = x ^ (x >> 14)
+    return x & 0xFFFFFFFF
+
 
 def seeded_uniform_noise(seed: torch.Tensor, shape: tuple) -> torch.Tensor:
     """Generate fast, deterministic pseudo-random noise for each seed row.
@@ -86,20 +94,19 @@ def seeded_uniform_noise(seed: torch.Tensor, shape: tuple) -> torch.Tensor:
     num_envs = seed.shape[0]
     flat_size = int(torch.prod(torch.tensor(shape, device=seed.device)))
 
-    # Flatten obs
-    obs_flat = seed.reshape(num_envs, -1)
-    obs_int = (obs_flat * 1e4).to(torch.int64)
+    # --- Step 1: flatten seed into row integers ---
+    seed_flat = seed.reshape(num_envs, -1)
+    seed_int = (seed_flat * 1e3).to(torch.int64)
 
-    # Hash obs into seeds (better distribution than sum)
-    seeds = obs_int.sum(dim=1) ^ (obs_int.prod(dim=1) % (2**63))
-    seeds = seeds & 0xFFFFFFFFFFFFFFFF  # keep 64-bit
+    # simple low-entropy row seed (sum + mod 2^32)
+    seeds = seed_int.sum(dim=1) % (2**32)   # (num_envs,)
 
-    # Expand seeds over required noise length
+    # --- Step 2: expand across required length ---
     idx = torch.arange(flat_size, device=seed.device, dtype=torch.int64).unsqueeze(0)
-    seeds = seeds.unsqueeze(1) + idx
+    seeds = (seeds.unsqueeze(1) + idx) & 0xFFFFFFFF
 
-    # Apply splitmix hash
-    rand_ints = _splitmix64(seeds)
-    rand = (rand_ints.float() / float(2**64))  # normalize to [0,1)
+    # --- Step 3: apply mixing hash for "grainy" noise ---
+    rand_ints = _mix32(seeds)
+    rand = rand_ints.float() / float(2**32)   # uniform [0,1)
 
     return rand.view((num_envs,) + shape)
