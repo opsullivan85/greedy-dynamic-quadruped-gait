@@ -89,12 +89,12 @@ def get_step_locations_hip() -> NDArray[Shape["4, N, M ,2"], Float32]:
             (4, N, M, 2) where n and m are the number of footstep positions.
             in FR, FL, RR, RL order.
     """
-    N, M = fs._grid_size
+    N, M = fs._depricated_grid_size
     leg = np.empty((N, M, 2), dtype=np.float32)
-    half_size_x = (fs._grid_size[0] - 1) * fs._grid_resolution / 2
-    half_size_y = (fs._grid_size[1] - 1) * fs._grid_resolution / 2
-    x_locations = np.linspace(-half_size_x, half_size_x, fs._grid_size[0])
-    y_locations = np.linspace(-half_size_y, half_size_y, fs._grid_size[1])
+    half_size_x = (fs._depricated_grid_size[0] - 1) * fs._depricated_grid_resolution / 2
+    half_size_y = (fs._depricated_grid_size[1] - 1) * fs._depricated_grid_resolution / 2
+    x_locations = np.linspace(-half_size_x, half_size_x, fs._depricated_grid_size[0])
+    y_locations = np.linspace(-half_size_y, half_size_y, fs._depricated_grid_size[1])
     for i, x in enumerate(x_locations):
         for j, y in enumerate(y_locations):
             leg[i, j] = [x, y]
@@ -252,7 +252,7 @@ class CostManager:
                 cost.terminal_cost(env)
                 .cpu()
                 .numpy()
-                .reshape((4, fs._grid_size[0], fs._grid_size[1]))
+                .reshape((4, fs._depricated_grid_size[0], fs._depricated_grid_size[1]))
             )
             titles.append(cost.name)
         view_multiple_footstep_cost_maps(
@@ -283,7 +283,7 @@ def get_step_cost_map(
             (4, N, M) where n and m are the number of footstep positions
         np.ndarray: States for each footstep position if done, else None.
     """
-    N, M = fs._grid_size
+    N, M = fs._depricated_grid_size
     controllers: VectorPool[SimInterface] = env.cfg.controllers  # type: ignore
     footstep_locations_hip = get_step_locations_hip()
 
@@ -411,7 +411,7 @@ def get_control_vector(max_yaw: float, max_control_input: float) -> np.ndarray:
 
 def main():
     # 4 since there are 4 feet
-    num_envs = 4 * fs._grid_size[0] * fs._grid_size[1]
+    num_envs = 4 * fs._depricated_grid_size[0] * fs._depricated_grid_size[1]
     # create environment configuration
     env_cfg: QuadrupedEnvCfg = get_quadruped_env_cfg(num_envs, args.device)
     # setup RL environment
@@ -450,8 +450,8 @@ def main():
         "max_yaw": max_yaw,
         "max_control_input": max_control_input,
         "num_envs": num_envs,
-        "footstep_grid_size": fs._grid_size,
-        "footstep_grid_resolution": fs._grid_resolution,
+        "footstep_grid_size": fs._depricated_grid_size,
+        "footstep_grid_resolution": fs._depricated_grid_resolution,
         "step_dt": env.step_dt,
         "physics_dt": env.physics_dt,
         "iterations_between_mpc": iterations_between_mpc,
@@ -571,7 +571,7 @@ def main():
 
 def dfs_debug():
     # 4 since there are 4 feet
-    num_envs = 4 * fs._grid_size[0] * fs._grid_size[1]
+    num_envs = 4 * fs._depricated_grid_size[0] * fs._depricated_grid_size[1]
     # create environment configuration
     env_cfg: QuadrupedEnvCfg = get_quadruped_env_cfg(num_envs, args.device)
     # setup RL environment

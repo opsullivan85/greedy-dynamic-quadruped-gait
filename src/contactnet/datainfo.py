@@ -55,7 +55,7 @@ def generate_all_costmaps():
                 continue
             cost_map: np.ndarray = instance.cost_map
             # reshape cost map to 4,n,m
-            cost_map = cost_map.reshape((4, *fs._grid_size))
+            cost_map = cost_map.reshape((4, *fs._depricated_grid_size))
 
             title = f"{data_file.name} - {idx}"
             view_footstep_cost_map(

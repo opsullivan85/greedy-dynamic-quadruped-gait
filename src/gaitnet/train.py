@@ -79,7 +79,7 @@ def main():
     env = RslRlVecEnvWrapper(env)
 
     obs_space = env.observation_space["policy"].shape[1]
-    robot_state_dim = obs_space - (4*fs._grid_size[0]*fs._grid_size[1])  # subtract height scan
+    robot_state_dim = obs_space - (4*fs._depricated_grid_size[0]*fs._depricated_grid_size[1])  # subtract height scan
     # action_space = env.action_space.shape[1]
     # 2 per leg
     num_footstep_candidates = 16

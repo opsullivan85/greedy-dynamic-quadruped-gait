@@ -96,7 +96,7 @@ VoidTerrainImporterCfg: Callable[[], TerrainImporterCfg] = lambda: TerrainImport
         sub_terrains={
             "holes": HfVoidTerrainCfg(
                 void_depth=-0.5,
-                platform_size=1.0,
+                platform_size=0.5,
             ),
         },
         curriculum=True,

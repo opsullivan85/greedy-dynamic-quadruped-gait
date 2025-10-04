@@ -14,6 +14,7 @@ from src import PROJECT_ROOT
 from src.contactnet.util import get_checkpoint_path, get_dataset_paths
 from src import get_logger
 import src.simulation.cfg.footstep_scanner_constants as fs
+import src.constants as const
 
 logger = get_logger()
 
@@ -516,7 +517,7 @@ class CostMapGenerator:
         # assume the first 18 elements of obs are the same as flatten_state
         x = obs[:, :18]
 
-        costmaps = self.model(x).reshape(-1, 4, fs._grid_size[0], fs._grid_size[1])
+        costmaps = self.model(x).reshape(-1, 4, const.contact_net.grid_size[0], const.contact_net.grid_size[1])
 
         return costmaps
 

@@ -13,12 +13,11 @@ from isaaclab.envs.utils.io_descriptors import (
     record_dtype,
     record_shape,
 )
-import src.simulation.cfg.footstep_scanner_constants as fs
 import torch.nn.functional as F
 from src.util.vectorpool import VectorPool
 from src.sim2real.abstractinterface import Sim2RealInterface
 from src import get_logger
-from src.util.data_logging import save_img
+from src.util.data_logging import save_fig, save_img
 import src.constants as const
 
 logger = get_logger()
@@ -116,11 +115,28 @@ def cspace_height_scan(
     """
     height_scan = mdp.height_scan(env=env, sensor_cfg=sensor_cfg, offset=offset)
     # reshape to (N, H, W)
-    height_scan = height_scan.reshape((-1, *footstep_scanner.grid_size))
+    height_scan = height_scan.reshape((-1, *const.footstep_scanner.grid_size))
+
+    save_img(
+        height_scan[0].cpu().numpy(), 
+        f"height_scan_{sensor_cfg.name}", 
+        cmap_limits=(-1, 1), 
+    )
 
     # apply cspace dialation
-    height_scan = F.max_pool2d(height_scan, kernel_size=3, stride=1, padding=1)
-
+    kernel_size = const.footstep_scanner.cspace_dialation * 2 + 1
+    # TODO: maybe we consider expanding our sensor size by padding
+    # so we aren't getting misleading values at the edges?
+    padding = const.footstep_scanner.cspace_dialation
+    height_scan = F.max_pool2d(
+        height_scan, kernel_size=kernel_size, stride=1, padding=padding
+    )
+    
+    save_img(
+        height_scan[0].cpu().numpy(), 
+        f"cspace_{sensor_cfg.name}", 
+        cmap_limits=(-1, 1), 
+    )
 
     # flatten to (N, H*W)
     height_scan = height_scan.reshape(height_scan.shape[0], -1)
@@ -214,11 +230,16 @@ def get_terrain_mask(
     0 indicates invalid terrain (too high or too low)
     1 indicates valid terrain
     """
-    terrain_terms = fs._grid_size[0] * fs._grid_size[1] * 4
+    terrain_terms = (
+        const.footstep_scanner.grid_size[0] * const.footstep_scanner.grid_size[1] * 4
+    )
     terrain_obs = obs[:, -terrain_terms:]
     # reshape to (N, 4, H, W)
     terrain_obs = terrain_obs.reshape(
-        terrain_obs.shape[0], 4, fs._grid_size[0], fs._grid_size[1]
+        terrain_obs.shape[0],
+        4,
+        const.footstep_scanner.grid_size[0],
+        const.footstep_scanner.grid_size[1],
     )
     # mask out values outside of allowed height range
     max_height, min_height = valid_height_range

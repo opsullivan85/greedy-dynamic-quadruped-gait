@@ -32,6 +32,26 @@ def save_img(
     img: np.ndarray,
     name: str | None = None,
     cmap_limits: tuple[float, float] | None = None,
+):
+    """Save an image to the logs directory with a timestamp."""
+    global i
+    name = name if name is not None else "image"
+    timestamp = (
+        datetime.now()
+        .isoformat(timespec="microseconds")
+        .replace(".", "-")
+        .replace(":", "-")
+    )
+    image_file = image_dir / f"{timestamp}_{i}_{name}.png"
+    plt.imsave(image_file, img, vmin=cmap_limits[0] if cmap_limits else None, vmax=cmap_limits[1] if cmap_limits else None)
+    logger.info(f"saved image to {image_file}")
+    i += 1
+
+
+def save_fig(
+    img: np.ndarray,
+    name: str | None = None,
+    cmap_limits: tuple[float, float] | None = None,
     gridlines: bool = False,
 ) -> None:
     """Save an image to the logs directory with a timestamp."""

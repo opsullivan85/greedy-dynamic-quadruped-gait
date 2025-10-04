@@ -11,6 +11,8 @@ from src.gaitnet.env_cfg.observations import get_terrain_mask
 from src.simulation.cfg.footstep_scanner_constants import idx_to_xy
 
 from src.contactnet.debug import view_footstep_cost_map
+from src.util.data_logging import save_fig, save_img
+import src.constants as const
 
 logger = get_logger()
 
@@ -145,10 +147,37 @@ class FootstepOptionGenerator:
         """
         with torch.inference_mode():
             cost_maps = self.cost_map_generator.predict(obs)  # (num_envs, 4, H, W)
-            # switch from (FL, FR, RL, RR) to (FR, FL, RR, RL)
-            cost_maps = cost_maps[:, [1, 0, 3, 2], :, :]
+
+        # switch from (FL, FR, RL, RR) to (FR, FL, RR, RL)
+        cost_maps = cost_maps[:, [1, 0, 3, 2], :, :]
+
+        save_img(
+            cost_maps[0, 0].cpu().numpy(),
+            name="raw_cost_map_FR",
+            cmap_limits=(-1, 1),
+        )
+
+        # interpolate cost map
+        cost_maps = nn.functional.interpolate(
+            cost_maps,  # (num_envs, 4, h, w) 4 is being used as the channel dimension here
+            size=const.footstep_scanner.grid_size.tolist(),  # (H, W)
+            mode="bilinear",
+            align_corners=True,
+        ).squeeze(1)  # (num_envs, 4, H, W)
+        
+        save_img(
+            cost_maps[0, 0].cpu().numpy(),
+            name="interpolated_cost_map_FR",
+            cmap_limits=(-1, 1),
+        )
 
         masked_cost_maps = self._filter_cost_map(cost_maps, obs)  # (num_envs, 4, H, W)
+        
+        save_img(
+            cost_maps[0, 0].cpu().numpy(),
+            name="masked_cost_map_FR",
+            cmap_limits=(-1, 1),
+        )
 
         # best_options, best_values = self._overall_best_options(masked_cost_maps, self.num_options)
         best_options, best_values = self._best_options_per_leg(
