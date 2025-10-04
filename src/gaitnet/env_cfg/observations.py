@@ -117,11 +117,11 @@ def cspace_height_scan(
     # reshape to (N, H, W)
     height_scan = height_scan.reshape((-1, *const.footstep_scanner.grid_size))
 
-    save_img(
-        height_scan[0].cpu().numpy(), 
-        f"height_scan_{sensor_cfg.name}", 
-        cmap_limits=(-1, 1), 
-    )
+    # save_img(
+    #     height_scan[0].cpu().numpy(), 
+    #     f"height_scan_{sensor_cfg.name}", 
+    #     cmap_limits=(-1, 1), 
+    # )
 
     # apply cspace dialation
     kernel_size = const.footstep_scanner.cspace_dialation * 2 + 1
@@ -132,11 +132,11 @@ def cspace_height_scan(
         height_scan, kernel_size=kernel_size, stride=1, padding=padding
     )
     
-    save_img(
-        height_scan[0].cpu().numpy(), 
-        f"cspace_{sensor_cfg.name}", 
-        cmap_limits=(-1, 1), 
-    )
+    # save_img(
+    #     height_scan[0].cpu().numpy(), 
+    #     f"cspace_{sensor_cfg.name}", 
+    #     cmap_limits=(-1, 1), 
+    # )
 
     # flatten to (N, H*W)
     height_scan = height_scan.reshape(height_scan.shape[0], -1)

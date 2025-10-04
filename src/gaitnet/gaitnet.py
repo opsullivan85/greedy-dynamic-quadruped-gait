@@ -151,11 +151,11 @@ class FootstepOptionGenerator:
         # switch from (FL, FR, RL, RR) to (FR, FL, RR, RL)
         cost_maps = cost_maps[:, [1, 0, 3, 2], :, :]
 
-        save_img(
-            cost_maps[0, 0].cpu().numpy(),
-            name="raw_cost_map_FR",
-            cmap_limits=(-1, 1),
-        )
+        # save_img(
+        #     cost_maps[0, 0].cpu().numpy(),
+        #     name="raw_cost_map_FR",
+        #     cmap_limits=(-1, 1),
+        # )
 
         # interpolate cost map
         cost_maps = nn.functional.interpolate(
@@ -163,21 +163,41 @@ class FootstepOptionGenerator:
             size=const.footstep_scanner.grid_size.tolist(),  # (H, W)
             mode="bilinear",
             align_corners=True,
-        ).squeeze(1)  # (num_envs, 4, H, W)
-        
-        save_img(
-            cost_maps[0, 0].cpu().numpy(),
-            name="interpolated_cost_map_FR",
-            cmap_limits=(-1, 1),
+        ).squeeze(
+            1
+        )  # (num_envs, 4, H, W)
+
+        # apply noise to costmap to slightly spread apart the best options
+        noise = torch.empty_like(cost_maps).uniform_(
+            -const.footstep_scanner.upscale_costmap_noise,
+            const.footstep_scanner.upscale_costmap_noise,
         )
+        cost_maps += noise
+
+        # save_img(
+        #     cost_maps[0, 0].cpu().numpy(),
+        #     name="interpolated_cost_map_FR",
+        # )
+        # save_img(
+        #     cost_maps[0, 1].cpu().numpy(),
+        #     name="interpolated_cost_map_FL",
+        # )
+        # save_img(
+        #     cost_maps[0, 2].cpu().numpy(),
+        #     name="interpolated_cost_map_RL",
+        # )
+        # save_img(
+        #     cost_maps[0, 3].cpu().numpy(),
+        #     name="interpolated_cost_map_RR",
+        # )
 
         masked_cost_maps = self._filter_cost_map(cost_maps, obs)  # (num_envs, 4, H, W)
-        
-        save_img(
-            cost_maps[0, 0].cpu().numpy(),
-            name="masked_cost_map_FR",
-            cmap_limits=(-1, 1),
-        )
+
+        # save_img(
+        #     cost_maps[0, 0].cpu().numpy(),
+        #     name="masked_cost_map_FR",
+        #     cmap_limits=(-1, 1),
+        # )
 
         # best_options, best_values = self._overall_best_options(masked_cost_maps, self.num_options)
         best_options, best_values = self._best_options_per_leg(
@@ -515,7 +535,7 @@ class GaitNetActorCritic(ActorCritic):
                     For no-action: [NO_STEP, 0, 0, 0]
         """
         self._ensure_forward_pass(observations)
-        
+
         batch_size = observations.shape[0]
         
         # Prepare actions with durations
