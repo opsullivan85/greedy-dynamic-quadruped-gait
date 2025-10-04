@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from isaaclab.envs import ManagerBasedRLEnv
 from src.gaitnet.actions.footstep_action import NO_STEP
-from src import get_logger
+from src import contactnet, get_logger
 from src.contactnet.contactnet import CostMapGenerator
 from src.gaitnet.env_cfg.observations import get_terrain_mask
 from src.simulation.cfg.footstep_scanner_constants import idx_to_xy
@@ -13,6 +13,7 @@ from src.simulation.cfg.footstep_scanner_constants import idx_to_xy
 from src.contactnet.debug import view_footstep_cost_map
 from src.util.data_logging import save_fig, save_img
 import src.constants as const
+from src.util.math import seeded_uniform_noise
 
 logger = get_logger()
 
@@ -145,8 +146,11 @@ class FootstepOptionGenerator:
                           total shape is (num_options, 3)
             torch.Tensor: Corresponding costs of shape (num_envs, num_options)
         """
+        contactnet_obs = obs[:, :18]
         with torch.inference_mode():
-            cost_maps = self.cost_map_generator.predict(obs)  # (num_envs, 4, H, W)
+            cost_maps = self.cost_map_generator.predict(
+                contactnet_obs
+            )  # (num_envs, 4, H, W)
 
         # switch from (FL, FR, RL, RR) to (FR, FL, RR, RL)
         cost_maps = cost_maps[:, [1, 0, 3, 2], :, :]
@@ -167,10 +171,12 @@ class FootstepOptionGenerator:
             1
         )  # (num_envs, 4, H, W)
 
-        # apply noise to costmap to slightly spread apart the best options
-        noise = torch.empty_like(cost_maps).uniform_(
-            -const.footstep_scanner.upscale_costmap_noise,
-            const.footstep_scanner.upscale_costmap_noise,
+        # apply determanistic noise to costmap to slightly spread apart the best options
+        # it is important that this is reproducable for the RL algorithm
+        noise = seeded_uniform_noise(cost_maps, cost_maps.shape[1:])
+        noise = (
+            noise * 2 * const.footstep_scanner.upscale_costmap_noise
+            - const.footstep_scanner.upscale_costmap_noise
         )
         cost_maps += noise
 
@@ -537,37 +543,41 @@ class GaitNetActorCritic(ActorCritic):
         self._ensure_forward_pass(observations)
 
         batch_size = observations.shape[0]
-        
+
         # Prepare actions with durations
         actions_with_durations = torch.cat(
             [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)],
             dim=-1,
         )  # (batch, num_options + 1, 4)
-        
+
         if kwargs.get("deterministic", False):
             # Vectorized deterministic selection
             best_indices = self._cached_action_values.argmax(dim=1)  # (batch,)
         else:
             # Vectorized stochastic sampling
-            best_indices = torch.multinomial(self._cached_action_probs, 1).squeeze(1)  # (batch,)
-        
+            best_indices = torch.multinomial(self._cached_action_probs, 1).squeeze(
+                1
+            )  # (batch,)
+
         # Gather selected actions: (batch, 4)
         selected_actions = actions_with_durations[
             torch.arange(batch_size, device=observations.device), best_indices
         ]
-        
+
         # Compute log probs: (batch,)
         selected_log_probs = torch.log(
             self._cached_action_probs[
                 torch.arange(batch_size, device=observations.device), best_indices
-            ] + 1e-8
+            ]
+            + 1e-8
         )
-        
+
         # Cache for efficiency
         self._cached_selected_actions = selected_actions.clone()
         self._cached_selected_log_probs = selected_log_probs
-        
+
         return selected_actions
+
     def act_inference(self, observations: torch.Tensor) -> torch.Tensor:
         """
         Deterministic action selection for inference/evaluation.
@@ -584,7 +594,7 @@ class GaitNetActorCritic(ActorCritic):
     def get_actions_log_prob(self, actions: torch.Tensor) -> torch.Tensor:
         """
         Compute log probabilities based on action content, not indices.
-        
+
         NOTE: PPO calls act() with the mini-batch observations BEFORE calling this method,
         so the cache should be valid for the current mini-batch.
 
@@ -599,32 +609,36 @@ class GaitNetActorCritic(ActorCritic):
             self._cached_selected_actions is not None
             and actions.shape == self._cached_selected_actions.shape
             and actions.device == self._cached_selected_actions.device
-            and torch.allclose(actions, self._cached_selected_actions, rtol=1e-5, atol=1e-8)
+            and torch.allclose(
+                actions, self._cached_selected_actions, rtol=1e-5, atol=1e-8
+            )
         ):
             return self._cached_selected_log_probs
 
         # Vectorized matching on footstep content only (ignore duration)
         batch_size = actions.shape[0]
         device = actions.device
-        
+
         # Extract footstep part: [leg_idx, dx, dy]
         actions_footstep = actions[:, :3]  # (batch, 3)
         options_footstep = self._cached_footstep_options  # (batch, num_options+1, 3)
-        
+
         # Compute pairwise differences: (batch, num_options+1, 3)
         # Expand dims for broadcasting: (batch, 1, 3) vs (batch, num_options+1, 3)
         differences = torch.abs(
             actions_footstep.unsqueeze(1) - options_footstep
         )  # (batch, num_options+1, 3)
-        
+
         # Sum across feature dimension to get total difference per option
         total_diff = differences.sum(dim=-1)  # (batch, num_options+1)
-        
+
         # Find best matching option for each batch element
         best_match_indices = torch.argmin(total_diff, dim=-1)  # (batch,)
-        
+
         # Optional: Check if matching failed (for debugging)
-        min_diffs = total_diff[torch.arange(batch_size, device=device), best_match_indices]
+        min_diffs = total_diff[
+            torch.arange(batch_size, device=device), best_match_indices
+        ]
         if torch.any(min_diffs > 1e-4):
             num_failed = (min_diffs > 1e-4).sum().item()
             max_diff = min_diffs.max().item()
@@ -632,27 +646,25 @@ class GaitNetActorCritic(ActorCritic):
                 f"Action matching failed for {num_failed}/{batch_size} samples! "
                 f"Max difference: {max_diff:.6f}"
             )
-        
+
         # Gather log probabilities using matched indices
         log_probs = torch.log(
             self._cached_action_probs[
-                torch.arange(batch_size, device=device), 
-                best_match_indices
-            ] + 1e-8
+                torch.arange(batch_size, device=device), best_match_indices
+            ]
+            + 1e-8
         )
-        
+
         return log_probs
 
     @property
     def action_mean(self):
-        """ this model is not compatiable with adaptive schedules
-        """
+        """this model is not compatiable with adaptive schedules"""
         return torch.zeros(1)
 
     @property
     def action_std(self):
-        """ this model is not compatiable with adaptive schedules
-        """
+        """this model is not compatiable with adaptive schedules"""
         return torch.zeros(1)
 
     @property

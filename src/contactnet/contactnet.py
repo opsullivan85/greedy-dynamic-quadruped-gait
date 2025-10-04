@@ -505,19 +505,18 @@ class CostMapGenerator:
         if eval:
             self.model.eval()
 
-    def predict(self, obs: torch.Tensor) -> torch.Tensor:
+    def predict(self, contactnet_obs: torch.Tensor) -> torch.Tensor:
         """Predict footstep cost maps from the current environment state.
 
         Args:
             env (ManagerBasedRLEnv): The environment containing the robot state.
+            contactnet_obs (torch.Tensor): Preprocessed observation tensor of shape (num_envs, obs_dim).
+                expects the same observation as flatten_state in FootstepDataset.
         
         Returns:
             torch.Tensor: Predicted cost maps of shape (num_envs, 4, 5, 5)
         """
-        # assume the first 18 elements of obs are the same as flatten_state
-        x = obs[:, :18]
-
-        costmaps = self.model(x).reshape(-1, 4, const.contact_net.grid_size[0], const.contact_net.grid_size[1])
+        costmaps = self.model(contactnet_obs).reshape(-1, 4, const.contact_net.grid_size[0], const.contact_net.grid_size[1])
 
         return costmaps
 
