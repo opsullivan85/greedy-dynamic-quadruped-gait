@@ -33,7 +33,7 @@ class _FootstepScanner:
     """Grid size used in footstep scanner observations"""
     cspace_dialation: int = 2
     """Number of times to apply max-pooling to the height scan to simulate c-space dialation"""
-    upscale_costmap_noise: float = 0.03
+    upscale_costmap_noise: float = 0.1
     """Amount of noise (+/-) to add to the costmap during upscale"""
 
     def __post_init__(self):

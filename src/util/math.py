@@ -58,11 +58,23 @@ def quat_to_euler_torch(
     return _quat_to_euler(w, x, y, z, backend=torch)
 
 
+def _splitmix64(x: torch.Tensor) -> torch.Tensor:
+    """Fast 64-bit hash function for pseudo-randomness, vectorized on GPU."""
+    x = (x + 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9 & 0xFFFFFFFFFFFFFFFF
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EB & 0xFFFFFFFFFFFFFFFF
+    x = x ^ (x >> 31)
+    return x
+
+
 def seeded_uniform_noise(seed: torch.Tensor, shape: tuple) -> torch.Tensor:
     """Generate fast, deterministic pseudo-random noise for each seed row.
 
     Chat's implementation of a 32 bit linear congruential generator (LCG) seeded
     with a tensor.
+
+    importantly, each row in the output is determined only by the corresponding row in the seed.
+    so re-ordering the major axis of the seed will re-order the output in the same way.
 
     Args:
         seed (torch.Tensor): Input tensor of shape (num_envs, obs_dim).
@@ -71,19 +83,23 @@ def seeded_uniform_noise(seed: torch.Tensor, shape: tuple) -> torch.Tensor:
     Returns:
         torch.Tensor: Pseudo-random noise tensor of shape (num_envs, *shape) on the same device as seed.
     """
-
     num_envs = seed.shape[0]
-    flat_size = int(torch.prod(torch.tensor(shape)))
+    flat_size = int(torch.prod(torch.tensor(shape, device=seed.device)))
 
-    seeds = (seed * 1e4).to(torch.int32).sum(dim=1)  # (num_envs,)
-    seeds = torch.remainder(seeds, 2**31)  # ensure 32-bit
+    # Flatten obs
+    obs_flat = seed.reshape(num_envs, -1)
+    obs_int = (obs_flat * 1e4).to(torch.int64)
 
-    a, c, m = 1664525, 1013904223, 2**32
+    # Hash obs into seeds (better distribution than sum)
+    seeds = obs_int.sum(dim=1) ^ (obs_int.prod(dim=1) % (2**63))
+    seeds = seeds & 0xFFFFFFFFFFFFFFFF  # keep 64-bit
 
-    idx = torch.arange(flat_size, device=seed.device).unsqueeze(0)  # (1, flat_size)
-    seeds = seeds.unsqueeze(1)  # (num_envs, 1)
+    # Expand seeds over required noise length
+    idx = torch.arange(flat_size, device=seed.device, dtype=torch.int64).unsqueeze(0)
+    seeds = seeds.unsqueeze(1) + idx
 
-    rand_ints = (a * (seeds + idx) + c) % m
-    noise = rand_ints.float() / m  # normalize to [0,1)
+    # Apply splitmix hash
+    rand_ints = _splitmix64(seeds)
+    rand = (rand_ints.float() / float(2**64))  # normalize to [0,1)
 
-    return noise.view((num_envs,) + shape)
+    return rand.view((num_envs,) + shape)
