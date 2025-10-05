@@ -40,7 +40,8 @@ import signal
 import datetime
 import os
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # type: ignore
-from src.gaitnet.gaitnet import GaitNetActorCritic, FootstepOptionGenerator
+from src.gaitnet.gaitnet import GaitNetActorCritic
+from src.gaitnet.env_cfg.footstep_options_env import FootstepOptionEnv
 import src.simulation.cfg.footstep_scanner_constants as fs
 from rsl_rl.runners import on_policy_runner
 import rsl_rl.modules
@@ -70,27 +71,18 @@ logger = get_logger()
 
 
 def main():
-    env_cfg, env = get_env(
+    env = get_env(
         num_envs=args_cli.num_envs,
         device=args_cli.device,
+        manager_class=FootstepOptionEnv
     )
 
     # wrap for RL training
     env = RslRlVecEnvWrapper(env)
 
-    obs_space = env.observation_space["policy"].shape[1]
-    robot_state_dim = obs_space - (4*fs._depricated_grid_size[0]*fs._depricated_grid_size[1])  # subtract height scan
-    # action_space = env.action_space.shape[1]
-    # 2 per leg
-    num_footstep_candidates = 16
-
-    footstep_option_generator = FootstepOptionGenerator(
-        env=env.unwrapped,
-        num_options=num_footstep_candidates,
-    )
-
     # hack to get OnPolicyRunner to be able to initiate a GaitNetActorCritic
-    on_policy_runner.__dict__["GaitNetActorCritic"] = GaitNetActorCritic  # type: ignore
+    actor_critic_class = GaitNetActorCritic
+    on_policy_runner.__dict__[actor_critic_class.__name__] = actor_critic_class  # type: ignore
 
     # Create unique experiment name with timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -121,11 +113,10 @@ def main():
             "lam": 0.95,
         },
         "policy": {
-            "class_name": "GaitNetActorCritic",
-            "robot_state_dim": robot_state_dim,
-            "num_footstep_options": num_footstep_candidates,
-            "hidden_dims": [128, 128],
-            "get_footstep_options": footstep_option_generator.get_footstep_options,
+            # "class_name": actor_critic_class.__name__,
+            "class_name": "ActorCritic",
+            "hidden_dims": [128, 128, 128],
+            "footstep_observation_manager": env.unwrapped.observation_manager,  # type: ignore
         },
         "log_dir": log_dir,
         "num_steps_per_env": 1000,  # ~2 episodes per batch (episode = 10s = 500 iterations)

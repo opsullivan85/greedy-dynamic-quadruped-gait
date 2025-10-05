@@ -53,12 +53,9 @@ class _GaitNet:
     """Number of times to apply max-pooling to the height scan to simulate c-space dialation"""
     upscale_costmap_noise: float = 0.1
     """Amount of noise (+/-) to add to the costmap during upscale"""
-    valid_height_range: np.ndarray = np.array([-0.5, 0], dtype=np.float32)
+    valid_height_range: tuple[float, float] = (-0.5, 0)
     """(min, max) valid height range for footstep options.
     Note that these are negative of the values you would expect."""
-
-    def __post_init__(self):
-        self.valid_height_range.setflags(write=False)
 
 
 gait_net = _GaitNet()
@@ -79,7 +76,6 @@ robot = _Robot()
 
 assert contact_net.grid_size.shape == (2,), "ContactNet grid size must be 2D"
 assert footstep_scanner.grid_size.shape == (2,), "Footstep scanner grid size must be 2D"
-assert gait_net.valid_height_range.shape == (2,), "GaitNet valid height range must be 2D"
 
 assert np.all(
     contact_net.grid_resolution * contact_net.grid_size

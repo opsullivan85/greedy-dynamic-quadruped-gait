@@ -45,7 +45,7 @@ class FootstepOptionGenerator:
         """
         # remove options with invalid terrain
         terrain_mask = get_terrain_mask(
-            const.gait_net.valid_height_range.tolist(), obs
+            const.gait_net.valid_height_range, obs
         )  # (num_envs, 4, H, W)
         masked_cost_maps = torch.where(
             terrain_mask, cost_map, torch.tensor(float("inf"), device=cost_map.device)
@@ -143,11 +143,13 @@ class FootstepOptionGenerator:
         no_step_option = torch.zeros(
             (num_envs, 1, 3),
             dtype=torch.float32,
+            device=cost_map.device,
         )
         no_step_option[:, 0] = NO_STEP
         no_step_value = torch.zeros(
             (num_envs, 1),
             dtype=torch.float32,
+            device=cost_map.device,
         )
         best_options.append(no_step_option)
         best_values.append(no_step_value)
@@ -258,7 +260,17 @@ class FootstepObservationManager(ObservationManager):
             torch.Tensor: Footstep actions of shape (num_envs, options_per_leg*4, 4)
                           Each action is represented as (leg_index, x_offset, y_offset, duration).
         """
-        return self._footstep_actions
+        # return self._footstep_actions
+        # TODO: remove this
+        # 0.2 durations for now
+        durations = torch.full(
+            (self.footstep_options.shape[0], self.footstep_options.shape[1], 1),
+            0.2,
+            device=self.footstep_options.device,
+        )
+        _footstep_actions = self.footstep_options.clone()
+        _footstep_actions[:, :, 3] = durations.squeeze(-1)
+        return _footstep_actions
 
     def set_footstep_actions(self, durations: torch.Tensor) -> None:
         """Set the footstep actions for the policy.
@@ -268,13 +280,28 @@ class FootstepObservationManager(ObservationManager):
         Args:
             durations (torch.Tensor): Footstep durations of shape (num_envs, options_per_leg*4).
         """
+        # TODO: setup custom actor critic to call this in forward
         self._footstep_actions = self.footstep_options.clone()
         self._footstep_actions[:, :, 3] = durations.squeeze(-1)
 
     def _overwrite_obs_dim(self) -> None:
         """Overwrite the observation dimensions to account for footstep options."""
-        # TODO: figure out how to do this
-        pass
+        self._group_obs_dim
+        policy_obs_dim = self._group_obs_dim["policy"][0]
+        # if this is a list throw an error
+        if isinstance(policy_obs_dim, tuple):
+            raise NotImplementedError(
+                "FootstepObservationManager does not support list observation dimensions."
+            )
+        obs_dim: int = policy_obs_dim
+        obs_dim -= const.footstep_scanner.total_robot_features
+
+        # add in the footstep options
+        # TODO: pull this from the footstep_controller action
+        footstep_option_size = 4  # (leg, dx, dy, cost)
+        # +1 is for the NO_STEP option
+        obs_dim += (const.gait_net.num_footstep_options * const.robot.num_legs + 1) * footstep_option_size
+        self._group_obs_dim["policy"] = (obs_dim, )
 
     def _modify_obs(self, obs: torch.Tensor) -> torch.Tensor:
         self.footstep_options = self.footstep_option_generator.get_footstep_options(obs)
@@ -302,7 +329,7 @@ class FootstepObservationManager(ObservationManager):
         if update_history:
             if not self.logged_update_history_warning:
                 logger.warning(
-                    "FootstepObservationManager may provide unexpected results when update_history is True."
+                    "FootstepObservationManager history might not work as expected."
                 )
                 self.logged_update_history_warning = True
 

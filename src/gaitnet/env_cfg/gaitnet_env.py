@@ -98,10 +98,10 @@ def _update_controllers(
 
 
 def get_env(
-    num_envs: int, device: str
-) -> tuple[GaitNetEnvCfg, ManagerBasedRLEnv]:
+    num_envs: int, device: str, manager_class = ManagerBasedRLEnv
+) -> ManagerBasedRLEnv:
     """Get the environment configuration and the environment instance."""
     env_cfg = _make_env_cfg(num_envs, device)
-    env = ManagerBasedRLEnv(cfg=env_cfg)
+    env = manager_class(cfg=env_cfg)
     _update_controllers(env_cfg, num_envs)
-    return env_cfg, env
+    return env
