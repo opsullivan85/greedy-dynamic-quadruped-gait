@@ -115,7 +115,7 @@ def main():
             "activation": "elu",
         },
         "log_dir": log_dir,
-        "num_steps_per_env": 1000,  # ~2 episodes per batch (episode = 10s = 500 iterations)
+        "num_steps_per_env": 500,  # ~2 episodes per batch (episode = 10s = 250 iterations)
         "save_interval": 5,
         "empirical_normalization": False,
         "logger": "tensorboard",  # Explicitly set TensorBoard as logger

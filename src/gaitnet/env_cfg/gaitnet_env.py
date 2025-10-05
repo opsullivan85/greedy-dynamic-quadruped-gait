@@ -50,7 +50,7 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         # general settings
-        self.decimation = 5  # env decimation -> 50 Hz footstep planning
+        self.decimation = 10  # env decimation -> 25 Hz footstep planning
         self.render_interval = (
             self.decimation / 2
         )  # render faster than footstep planning rate
