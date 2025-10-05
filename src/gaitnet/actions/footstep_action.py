@@ -163,7 +163,10 @@ class FSCActionTerm(ActionTerm):
         top2_action_indices = torch.gather(
             best_leg_action_indices, 1, top2_indices
         )  # (num_envs, 2)
-        top2_actions = all_actions[:, top2_action_indices]  # (num_envs, 2, 4)
+        
+        # Fix: Use proper indexing to avoid broadcasting
+        batch_indices = torch.arange(self.num_envs, device=self.device).unsqueeze(1)  # (num_envs, 1)
+        top2_actions = all_actions[batch_indices, top2_action_indices]  # (num_envs, 2, 4)
 
         # if the leg of the top action is no-op (-1), replace the second action no-op as well
         top2_actions[:, 1, 0] = torch.where(
@@ -192,19 +195,21 @@ class FSCActionTerm(ActionTerm):
         self._processed_actions = self.action_probs_to_actions(actions)
         processed_actions_cpu = self.processed_actions.cpu().numpy()
 
-        # mask out invalid steps
-        mask = processed_actions_cpu[:, 0] != NO_STEP
-        footstep_parameters = self.footstep_kwargs(processed_actions_cpu)
+        # iterate over the second axis of processed_actions
+        for i in range(processed_actions_cpu.shape[1]):
+            action = processed_actions_cpu[:, i, :]  # (num_envs, 4)
+            
+            # mask out invalid steps
+            mask = action[:, 0] != NO_STEP
+            footstep_parameters = self.footstep_kwargs(action)
 
-        # logger.info(f"actions: {actions[0].cpu().numpy().tolist()}")
-
-        # initiate the footsteps
-        robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.env_cfg.robot_controllers  # type: ignore
-        robot_controllers.call(
-            function=sim2real.Sim2RealInterface.initiate_footstep,
-            mask=mask,
-            **footstep_parameters,
-        )
+            # initiate the footsteps
+            robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.env_cfg.robot_controllers  # type: ignore
+            robot_controllers.call(
+                function=sim2real.Sim2RealInterface.initiate_footstep,
+                mask=mask,
+                **footstep_parameters,
+            )
 
     def apply_actions(self):
         """Applies the actions to the asset managed by the term.

@@ -40,7 +40,6 @@ import signal
 import datetime
 import os
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # type: ignore
-from src.gaitnet.gaitnet import GaitNetActorCritic
 from src.gaitnet.env_cfg.footstep_options_env import FootstepOptionEnv
 import src.simulation.cfg.footstep_scanner_constants as fs
 from rsl_rl.runners import on_policy_runner
@@ -80,10 +79,6 @@ def main():
     # wrap for RL training
     env = RslRlVecEnvWrapper(env)
 
-    # hack to get OnPolicyRunner to be able to initiate a GaitNetActorCritic
-    actor_critic_class = GaitNetActorCritic
-    on_policy_runner.__dict__[actor_critic_class.__name__] = actor_critic_class  # type: ignore
-
     # Create unique experiment name with timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_name = f"gaitnet_{timestamp}"
@@ -113,10 +108,11 @@ def main():
             "lam": 0.95,
         },
         "policy": {
-            # "class_name": actor_critic_class.__name__,
             "class_name": "ActorCritic",
-            "hidden_dims": [128, 128, 128],
-            "footstep_observation_manager": env.unwrapped.observation_manager,  # type: ignore
+            "init_noise_std": 1.0,
+            "actor_hidden_dims": [256, 256, 128],
+            "critic_hidden_dims": [256, 256, 128],
+            "activation": "elu",
         },
         "log_dir": log_dir,
         "num_steps_per_env": 1000,  # ~2 episodes per batch (episode = 10s = 500 iterations)
