@@ -231,6 +231,18 @@ class FootstepOptionGenerator:
         best_options, best_values = self._best_options_per_leg(
             masked_cost_maps, self.options_per_leg
         )
+        
+        # TODO: augment this with no-op embedding inside of custom actor
+        #       such that we are costs which are too high map onto the same no-op embedding
+        # Replace inf values with a large finite number to prevent NaN gradients
+        # This is crucial for neural network training stability
+        max_finite_cost = 2  # Large penalty for invalid options
+        best_values = torch.where(
+            torch.isinf(best_values),
+            torch.tensor(max_finite_cost, device=best_values.device, dtype=best_values.dtype),
+            best_values
+        )
+        
         result = torch.cat([best_options, best_values.unsqueeze(-1)], dim=-1)
         # (num_envs, num_options, 4) where each option is (leg, dx, dy, cost)
         return result
@@ -306,6 +318,12 @@ class FootstepObservationManager(ObservationManager):
     def _modify_obs(self, obs: torch.Tensor) -> torch.Tensor:
         self.footstep_options = self.footstep_option_generator.get_footstep_options(obs)
         # (num_envs, options_per_leg*4, 4) where each option is (leg_index, x_offset, y_offset, cost)
+
+        # Safety check: ensure no inf/nan values in observations
+        if torch.any(torch.isinf(self.footstep_options)) or torch.any(torch.isnan(self.footstep_options)):
+            logger.error("Found inf/nan in footstep options! This will cause training instability.")
+            logger.error(f"Inf count: {torch.isinf(self.footstep_options).sum().item()}")
+            logger.error(f"NaN count: {torch.isnan(self.footstep_options).sum().item()}")
 
         # replace the footstep scanner values at the end of the observation with the flattened footstep options
         obs = obs[:, : -const.footstep_scanner.total_robot_features]
