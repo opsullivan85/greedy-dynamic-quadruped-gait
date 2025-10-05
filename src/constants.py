@@ -27,27 +27,59 @@ _footstep_scanner_scale: int = 5
 class _FootstepScanner:
     grid_resolution: float = contact_net.grid_resolution / _footstep_scanner_scale
     """Grid resolution used in footstep scanner observations"""
+    total_robot_features: int = None  # type: ignore set in __post_init__
+    """Number of features in footstep scanner observations. Assumes one scanner per leg."""
     grid_size: np.ndarray = field(
         default_factory=lambda: contact_net.grid_size * _footstep_scanner_scale
     )
     """Grid size used in footstep scanner observations"""
-    cspace_dialation: int = 2
-    """Number of times to apply max-pooling to the height scan to simulate c-space dialation"""
-    upscale_costmap_noise: float = 0.1
-    """Amount of noise (+/-) to add to the costmap during upscale"""
 
     def __post_init__(self):
         self.grid_size.setflags(write=False)
+        object.__setattr__(
+            self, "total_robot_features", 4 * self.grid_size[0] * self.grid_size[1]
+        )
 
 
 footstep_scanner = _FootstepScanner()
 """Footstep scanner constants"""
 
 
+@dataclass(frozen=True)
+class _GaitNet:
+    num_footstep_options: int = 4
+    """Number of footstep options to provide per leg"""
+    cspace_dialation: int = 2
+    """Number of times to apply max-pooling to the height scan to simulate c-space dialation"""
+    upscale_costmap_noise: float = 0.1
+    """Amount of noise (+/-) to add to the costmap during upscale"""
+    valid_height_range: np.ndarray = np.array([-0.5, 0], dtype=np.float32)
+    """(min, max) valid height range for footstep options.
+    Note that these are negative of the values you would expect."""
+
+    def __post_init__(self):
+        self.valid_height_range.setflags(write=False)
+
+
+gait_net = _GaitNet()
+"""GaitNet constants"""
+
+
+@dataclass(frozen=True)
+class _Robot:
+    num_legs: int = 4
+    """Number of legs on the robot"""
+
+
+robot = _Robot()
+"""Robot constants"""
+
+
 ##### Checks
 
 assert contact_net.grid_size.shape == (2,), "ContactNet grid size must be 2D"
 assert footstep_scanner.grid_size.shape == (2,), "Footstep scanner grid size must be 2D"
+assert gait_net.valid_height_range.shape == (2,), "GaitNet valid height range must be 2D"
 
 assert np.all(
     contact_net.grid_resolution * contact_net.grid_size

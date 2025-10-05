@@ -37,6 +37,7 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
 
     robot_controllers: VectorPool[sim2real.Sim2RealInterface] = None  # type: ignore to be set later
 
+    # TODO: do this the right way
     # ['trunk', 'FL_hip', 'FR_hip', 'RL_hip', 'RR_hip', 'FL_thigh', 'FR_thigh', 'RL_thigh', 'RR_thigh', 'FL_calf', 'FR_calf', 'RL_calf', 'RR_calf', 'FL_foot', 'FR_foot', 'RL_foot', 'RR_foot']
     hip_indices = np.asarray([1, 2, 3, 4], dtype=np.int32)
     """In order: FL, FR, RL, RR"""
@@ -45,8 +46,6 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
     calf_indices = np.asarray([9, 10, 11, 12], dtype=np.int32)
     """In order: FL, FR, RL, RR"""
     foot_indices = np.asarray([13, 14, 15, 16], dtype=np.int32)
-
-    valid_height_range = (0, -0.5)  # (max, min)
 
     def __post_init__(self):
         """Post initialization."""
