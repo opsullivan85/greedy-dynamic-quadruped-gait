@@ -145,7 +145,7 @@ class FootstepOptionGenerator:
             dtype=torch.float32,
             device=cost_map.device,
         )
-        no_step_option[:, 0] = NO_STEP
+        no_step_option[:, 0, 0] = NO_STEP
         no_step_value = torch.zeros(
             (num_envs, 1),
             dtype=torch.float32,
@@ -231,20 +231,34 @@ class FootstepOptionGenerator:
         best_options, best_values = self._best_options_per_leg(
             masked_cost_maps, self.options_per_leg
         )
+
+        # replace any options with inf cost with NO_STEP option and 0 cost
+        inf_mask = torch.isinf(best_values)  # (num_envs, num_options)
+        if inf_mask.any():
+            # Use unsqueeze to broadcast the mask to match best_options shape
+            inf_mask_expanded = inf_mask.unsqueeze(-1)  # (num_envs, num_options, 1)
+            best_options[:, :, 0] = torch.where(inf_mask, torch.tensor(NO_STEP, device=best_options.device, dtype=best_options.dtype), best_options[:, :, 0])
+            best_options[:, :, 1:3] = torch.where(inf_mask_expanded.expand(-1, -1, 2), torch.tensor(0.0, device=best_options.device, dtype=best_options.dtype), best_options[:, :, 1:3])
+            best_values[inf_mask] = 0.0
         
-        # TODO: augment this with no-op embedding inside of custom actor
-        #       such that we are costs which are too high map onto the same no-op embedding
-        # Replace inf values with a large finite number to prevent NaN gradients
-        # This is crucial for neural network training stability
-        max_finite_cost = 2  # Large penalty for invalid options
-        best_values = torch.where(
-            torch.isinf(best_values),
-            torch.tensor(max_finite_cost, device=best_values.device, dtype=best_values.dtype),
-            best_values
-        )
+        # # TODO: augment this with no-op embedding inside of custom actor
+        # #       such that we are costs which are too high map onto the same no-op embedding
+        # # Replace inf values with a large finite number to prevent NaN gradients
+        # # This is crucial for neural network training stability
+        # max_finite_cost = 2  # Large penalty for invalid options
+        # best_values = torch.where(
+        #     torch.isinf(best_values),
+        #     torch.tensor(max_finite_cost, device=best_values.device, dtype=best_values.dtype),
+        #     best_values
+        # )
         
         result = torch.cat([best_options, best_values.unsqueeze(-1)], dim=-1)
         # (num_envs, num_options, 4) where each option is (leg, dx, dy, cost)
+
+        # shuffle the options to prevent any bias from ordering
+        # this is important because the policy might learn to ignore certain indices
+        shuffle_indices = torch.randperm(result.shape[1], device=result.device)
+        result = result[:, shuffle_indices, :]
         return result
 
 
@@ -266,15 +280,17 @@ class FootstepObservationManager(ObservationManager):
 
     @property
     def footstep_actions(self) -> torch.Tensor:
-        """Get the latest footstep actions selected by the policy.
+        """Get the latest footstep actions with durations from the policy.
 
         Returns:
-            torch.Tensor: Footstep actions of shape (num_envs, options_per_leg*4, 4)
+            torch.Tensor: Footstep actions of shape (num_envs, options_per_leg*4+1, 4)
                           Each action is represented as (leg_index, x_offset, y_offset, duration).
         """
-        # return self._footstep_actions
-        # TODO: remove this
-        # 0.2 durations for now
+        # If durations have been set by the policy, use them
+        if hasattr(self, '_footstep_actions') and self._footstep_actions is not None:
+            return self._footstep_actions
+        
+        # Otherwise, return options with default durations for initialization
         durations = torch.full(
             (self.footstep_options.shape[0], self.footstep_options.shape[1], 1),
             0.2,
@@ -284,22 +300,25 @@ class FootstepObservationManager(ObservationManager):
         _footstep_actions[:, :, 3] = durations.squeeze(-1)
         return _footstep_actions
 
-    def set_footstep_actions(self, durations: torch.Tensor) -> None:
-        """Set the footstep actions for the policy.
+    def set_footstep_actions(self, action_indices: torch.Tensor, durations: torch.Tensor) -> None:
+        """Set the footstep actions for the selected action indices.
 
-        Assumes that the footstep options have already been generated.
+        This is called after action selection to attach durations to the selected options.
 
         Args:
-            durations (torch.Tensor): Footstep durations of shape (num_envs, options_per_leg*4).
+            action_indices (torch.Tensor): Selected action indices of shape (num_envs, k).
+            durations (torch.Tensor): Footstep durations for selected actions, shape (num_envs, k).
         """
-        if durations.shape != (self.footstep_options.shape[0], self.footstep_options.shape[1]):
-            logger.warning(
-                f"durations shape {durations.shape} does not match footstep options shape {self.footstep_options.shape}. Normal for training"
-            )
-            return
-        # TODO: setup custom actor critic to call this in forward
+        # Create full action tensor from options
         self._footstep_actions = self.footstep_options.clone()
-        self._footstep_actions[:, :, 3] = durations.squeeze(-1)
+        
+        # Set durations for all options (we'll only use the selected ones)
+        # For simplicity, we update durations for the indices that were selected
+        batch_size, k = action_indices.shape
+        batch_indices = torch.arange(batch_size, device=action_indices.device).unsqueeze(1).expand(-1, k)
+        
+        # Update durations at the selected indices
+        self._footstep_actions[batch_indices, action_indices, 3] = durations
 
     def _overwrite_obs_dim(self) -> None:
         """Overwrite the observation dimensions to account for footstep options."""

@@ -45,7 +45,18 @@ class FSCActionTerm(ActionTerm):
             (self.num_envs, self.action_dim), device=self.device
         )
         self._processed_actions = self._raw_actions
+        
+        # Store reference to actor wrapper for duration retrieval
+        self._actor_wrapper = None
 
+    def set_actor_wrapper(self, actor_wrapper):
+        """Set the actor wrapper reference for duration retrieval.
+        
+        Args:
+            actor_wrapper: The GaitnetActorWrapper instance
+        """
+        self._actor_wrapper = actor_wrapper
+    
     def _get_option_manager(self) -> "FootstepObservationManager":
         """Get the footstep option manager.
 
@@ -59,8 +70,12 @@ class FSCActionTerm(ActionTerm):
 
     @property
     def action_dim(self) -> int:
-        """Dimension of the action term."""
-        return const.gait_net.num_footstep_options * 4 + 1  # 4 legs + no-op
+        """Dimension of the action term.
+        
+        Returns the number of action indices we select (k=2 for top-2 selection),
+        not the number of available options (17).
+        """
+        return 2  # We select top-2 action indices
 
     @property
     def raw_actions(self) -> torch.Tensor:
@@ -94,92 +109,46 @@ class FSCActionTerm(ActionTerm):
             "duration": processed_actions[:, 3],
         }
 
-    def action_probs_to_actions(self, action_probs: torch.Tensor) -> torch.Tensor:
-        """Convert the action probabilities to some number of footstep actions.
+    def action_indices_to_actions(self, action_indices: torch.Tensor) -> torch.Tensor:
+        """Convert action indices to footstep actions.
 
         Args:
-            action_probs: The raw action probabilities. (num_envs, action_dim)
+            action_indices: The action indices from the policy. (num_envs, k) where k=2
 
         Returns:
-            A list of footstep actions.
+            Footstep actions.
             (num_envs, 2, 4) where each action is (leg, x, y, duration)
-            the second index is the two actions chosen.
         """
-        # get the best action each leg can take
-        # also consider the no-op action's value (last index)
-        # considering these 5 actions and values, pick the 2 best actions
-        #     because of how we considered above, these are garanteed to pretain to different legs (or no-op)
-        # in the case that the no-op is the best of the two, replace the second best with no-op
-        # return the two actions as a list [(num_envs, 4), (num_envs, 4)]
-        # where each action is (leg, x, y, duration)
-
-        # TODO: make sure this behemoth of tensor operations is correct
-
-        # set of actions action_probs correspond to
+        # Get the footstep options and actions from the observation manager
         footstep_option_manager: "FootstepObservationManager" = (
             self._get_option_manager()
         )
-        all_actions = footstep_option_manager.footstep_actions
-        # we are assuming no-op is the last action
-        no_op_prob = action_probs[:, -1]
-        no_op_index = torch.full(
-            (self.num_envs, 1), -1, device=self.device, dtype=torch.int64
-        )
-        # reshape to (num_envs, num_legs, num_options)
-        leg_action_probs = action_probs[
-            :, :-1
-        ].view(  # (num_envs, num_legs, num_options)
-            self.num_envs, const.robot.num_legs, const.gait_net.num_footstep_options
-        )
-
-        # get the best action_probs and indices for each leg
-        best_leg_probs, best_leg_indices = torch.max(leg_action_probs, dim=2)
-        # add in the no-op action
-        best_leg_probs = torch.cat(
-            (best_leg_probs, no_op_prob.unsqueeze(1)), dim=1
-        )  # (num_envs, num_legs + 1)
-        best_leg_indices = torch.cat(
-            (best_leg_indices, no_op_index), dim=1
-        )  # (num_envs, num_legs + 1)
-
-        # map best_leg_indices back to action indices by adding offsets
-        offsets = [
-            0,
-            const.gait_net.num_footstep_options,
-            2 * const.gait_net.num_footstep_options,
-            3 * const.gait_net.num_footstep_options,
-            0,
-        ]  # last offset is for no-op which is already -1
-        offsets_tensor = torch.tensor(
-            offsets, device=self.device, dtype=torch.int64
-        ).unsqueeze(0)  # (1, num_legs + 1)
-        best_leg_action_indices = best_leg_indices + offsets_tensor  # (num_envs, num_legs + 1)
-
-        # get the top 2 actions
-        # at this point we don't care about the probabilities anymore
-        _, top2_indices = torch.topk(
-            best_leg_probs, k=2, dim=1, sorted=True
-        )  # (num_envs, 2)
-        top2_action_indices = torch.gather(
-            best_leg_action_indices, 1, top2_indices
-        )  # (num_envs, 2)
+        all_actions = footstep_option_manager.footstep_actions  # (num_envs, 17, 4)
         
-        # Fix: Use proper indexing to avoid broadcasting
-        batch_indices = torch.arange(self.num_envs, device=self.device).unsqueeze(1)  # (num_envs, 1)
-        top2_actions = all_actions[batch_indices, top2_action_indices]  # (num_envs, 2, 4)
-
-        # if the leg of the top action is no-op (-1), replace the second action no-op as well
-        top2_actions[:, 1, 0] = torch.where(
-            top2_actions[:, 0, 0] == NO_STEP, NO_STEP, top2_actions[:, 1, 0]
+        # action_indices shape: (num_envs, 2)
+        # all_actions shape: (num_envs, 17, 4)
+        
+        # Use proper indexing to select the actions
+        batch_size, k = action_indices.shape
+        batch_indices = torch.arange(batch_size, device=self.device).unsqueeze(1).expand(-1, k)
+        
+        # Gather the selected actions
+        selected_actions = all_actions[batch_indices, action_indices]  # (num_envs, 2, 4)
+        
+        # Handle no-op logic: if first action is no-op, make second one no-op too
+        selected_actions[:, 1, 0] = torch.where(
+            selected_actions[:, 0, 0] == NO_STEP, 
+            NO_STEP, 
+            selected_actions[:, 1, 0]
         )
-        # zero out the x, y, duration of no-op actions
-        # we only need to do this for the second action, because the first action would never be coerced to no-op
-        top2_actions[:, 1, 1:4] = torch.where(
-            top2_actions[:, 1, 0].unsqueeze(1) == NO_STEP,
-            torch.zeros_like(top2_actions[:, 1, 1:4]),
-            top2_actions[:, 1, 1:4],
+        # Zero out the x, y, duration of no-op actions for the second action
+        selected_actions[:, 1, 1:4] = torch.where(
+            selected_actions[:, 1, 0].unsqueeze(1) == NO_STEP,
+            torch.zeros_like(selected_actions[:, 1, 1:4]),
+            selected_actions[:, 1, 1:4],
         )
-        return top2_actions  # (num_envs, 2, 4)
+        
+        return selected_actions  # (num_envs, 2, 4)
 
     def process_actions(self, actions: torch.Tensor):
         """Processes the actions sent to the environment.
@@ -188,11 +157,19 @@ class FSCActionTerm(ActionTerm):
             This function is called once per environment step by the manager.
 
         Args:
-            actions: The actions to process.
+            actions: The action indices from the policy (num_envs, k)
         """
-        # initiate the footstep if specified by the actions
+        # Store raw actions
         self._raw_actions = actions
-        self._processed_actions = self.action_probs_to_actions(actions)
+        
+        # Get durations from the actor wrapper if available
+        if self._actor_wrapper is not None and hasattr(self._actor_wrapper, '_cached_durations'):
+            durations = self._actor_wrapper.get_durations_for_actions(actions)
+            footstep_option_manager = self._get_option_manager()
+            footstep_option_manager.set_footstep_actions(actions, durations)
+        
+        # Convert action indices to footstep actions
+        self._processed_actions = self.action_indices_to_actions(actions)
         processed_actions_cpu = self.processed_actions.cpu().numpy()
 
         # iterate over the second axis of processed_actions

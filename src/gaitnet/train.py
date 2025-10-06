@@ -102,6 +102,14 @@ def main():
         unique_layer_sizes=[64, 64],
         trunk_layer_sizes=[128],
     ).to(args_cli.device)
+    
+    # Set the actor wrapper reference in the FSC action term
+    # This allows the action term to retrieve durations for selected actions
+    fsc_action_term = env.action_manager._terms.get("footstep_controller")
+    if fsc_action_term is not None:
+        fsc_action_term.set_actor_wrapper(gaitnet_actor_wrapped)
+    else:
+        logger.warning("Could not find footstep_controller action term to set actor wrapper")
 
     actor_critic_class = gaitnet.GaitnetActorCritic
     on_policy_runner.__dict__[actor_critic_class.__name__] = actor_critic_class
