@@ -292,6 +292,11 @@ class FootstepObservationManager(ObservationManager):
         Args:
             durations (torch.Tensor): Footstep durations of shape (num_envs, options_per_leg*4).
         """
+        if durations.shape != (self.footstep_options.shape[0], self.footstep_options.shape[1]):
+            logger.warning(
+                f"durations shape {durations.shape} does not match footstep options shape {self.footstep_options.shape}. Normal for training"
+            )
+            return
         # TODO: setup custom actor critic to call this in forward
         self._footstep_actions = self.footstep_options.clone()
         self._footstep_actions[:, :, 3] = durations.squeeze(-1)
@@ -310,14 +315,40 @@ class FootstepObservationManager(ObservationManager):
 
         # add in the footstep options
         # TODO: pull this from the footstep_controller action
-        footstep_option_size = 4  # (leg, dx, dy, cost)
+        footstep_option_size = 8  # (leg_one_hot (5), dx, dy, cost)
         # +1 is for the NO_STEP option
         obs_dim += (const.gait_net.num_footstep_options * const.robot.num_legs + 1) * footstep_option_size
         self._group_obs_dim["policy"] = (obs_dim, )
 
+    @staticmethod
+    def footstep_options_to_one_hot(options: torch.Tensor) -> torch.Tensor:
+        """Convert footstep options to one-hot encoding.
+
+        Args:
+            options (torch.Tensor): Footstep options of shape (num_envs, options_per_leg*4, 4)
+                                    Each option is represented as (leg_index, x_offset, y_offset, cost).
+
+        Returns:
+            torch.Tensor: One-hot encoded footstep options of shape (num_envs, options_per_leg*4, embedding_dim)
+        """
+        num_envs, num_options, _ = options.shape
+        embedding_dim = const.robot.num_legs + 1
+        # +1 for no-step option to remap everything from -1-3 to 0-4
+        one_hot = F.one_hot(
+            options[:, :, 0].long()+1, num_classes=embedding_dim
+        )
+        # replace leg index with one-hot encoding
+        options_one_hot = torch.cat(
+            [one_hot.float(), options[:, :, 1:]], dim=-1
+        )  # (num_envs, num_options, 8)
+        return options_one_hot
+
+
     def _modify_obs(self, obs: torch.Tensor) -> torch.Tensor:
         self.footstep_options = self.footstep_option_generator.get_footstep_options(obs)
         # (num_envs, options_per_leg*4, 4) where each option is (leg_index, x_offset, y_offset, cost)
+
+        one_hot_options = self.footstep_options_to_one_hot(self.footstep_options)
 
         # Safety check: ensure no inf/nan values in observations
         if torch.any(torch.isinf(self.footstep_options)) or torch.any(torch.isnan(self.footstep_options)):
@@ -327,7 +358,7 @@ class FootstepObservationManager(ObservationManager):
 
         # replace the footstep scanner values at the end of the observation with the flattened footstep options
         obs = obs[:, : -const.footstep_scanner.total_robot_features]
-        obs = torch.cat([obs, self.footstep_options.flatten(start_dim=1)], dim=1)
+        obs = torch.cat([obs, one_hot_options.flatten(start_dim=1)], dim=1)
         return obs
 
     def compute_group(

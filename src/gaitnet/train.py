@@ -1,6 +1,8 @@
 from isaaclab.app import AppLauncher
 import argparse
 
+from src.control.mpc.convex_MPC import Gait
+
 # add argparse arguments
 parser = argparse.ArgumentParser(
     description="Train an RL agent with Stable-Baselines3."
@@ -46,6 +48,8 @@ from rsl_rl.runners import on_policy_runner
 import rsl_rl.modules
 from src.gaitnet.env_cfg.gaitnet_env import get_env
 from src.util import log_exceptions
+from src.gaitnet import gaitnet
+import src.constants as const
 from src import get_logger
 
 logger = get_logger()
@@ -73,8 +77,34 @@ def main():
     env = get_env(
         num_envs=args_cli.num_envs,
         device=args_cli.device,
-        manager_class=FootstepOptionEnv
+        manager_class=FootstepOptionEnv,
     )
+
+    shared_size = 22
+    unique_size = 8  # leg one-hot (5), dx, dy, cost
+
+    gaitnet_actor = gaitnet.GaitnetActor(
+        shared_state_dim=shared_size,
+        shared_layer_sizes=[128, 128],
+        unique_state_dim=unique_size,
+        unique_layer_sizes=[64, 64],
+        trunk_layer_sizes=[128],
+    ).to(args_cli.device)
+    gaitnet_actor_wrapped = gaitnet.GaitnetActorWrapper(gaitnet_actor, env).to(
+        args_cli.device
+    )
+
+    gaitnet_critic = gaitnet.GaitnetCritic(
+        shared_state_dim=shared_size,
+        shared_layer_sizes=[128, 128],
+        num_unique_states=const.gait_net.num_footstep_options*const.robot.num_legs+1,  # +1 for the "no step" option
+        unique_state_dim=unique_size,
+        unique_layer_sizes=[64, 64],
+        trunk_layer_sizes=[128],
+    ).to(args_cli.device)
+
+    actor_critic_class = gaitnet.GaitnetActorCritic
+    on_policy_runner.__dict__[actor_critic_class.__name__] = actor_critic_class
 
     # wrap for RL training
     env = RslRlVecEnvWrapper(env)
@@ -82,11 +112,11 @@ def main():
     # Create unique experiment name with timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_name = f"gaitnet_{timestamp}"
-    
+
     # Create unique log directory
     log_dir = f"./training/gaitnet/runs/{experiment_name}"
     save_dir = f"./training/gaitnet/checkpoints/{experiment_name}"
-    
+
     # Create directories if they don't exist
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(save_dir, exist_ok=True)
@@ -108,11 +138,9 @@ def main():
             "lam": 0.95,
         },
         "policy": {
-            "class_name": "ActorCritic",
-            "init_noise_std": 1.0,
-            "actor_hidden_dims": [256, 256, 128],
-            "critic_hidden_dims": [256, 256, 128],
-            "activation": "elu",
+            "class_name": actor_critic_class.__name__,
+            "actor": gaitnet_actor_wrapped,
+            "critic": gaitnet_critic,
         },
         "log_dir": log_dir,
         "num_steps_per_env": 500,  # ~2 episodes per batch (episode = 10s = 250 iterations)
@@ -134,7 +162,7 @@ def main():
         runner.load(args_cli.resume)
 
     logger.info("Starting training...")
-    
+
     # Let the runner handle the entire training loop
     # This ensures proper TensorBoard logging continuity
     try:

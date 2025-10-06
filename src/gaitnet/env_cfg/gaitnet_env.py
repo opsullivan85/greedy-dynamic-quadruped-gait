@@ -1,3 +1,4 @@
+from typing import TypeVar
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
 from isaaclab.sensors import SensorBaseCfg
 from isaaclab.utils import configclass
@@ -96,10 +97,12 @@ def _update_controllers(
     )
     cfg.robot_controllers = controllers  # type: ignore
 
+# generic for manager_class
+T = TypeVar("T", bound=ManagerBasedRLEnv)
 
 def get_env(
-    num_envs: int, device: str, manager_class = ManagerBasedRLEnv
-) -> ManagerBasedRLEnv:
+    num_envs: int, device: str, manager_class: type[T] = ManagerBasedRLEnv
+) -> T:
     """Get the environment configuration and the environment instance."""
     env_cfg = _make_env_cfg(num_envs, device)
     env = manager_class(cfg=env_cfg)
