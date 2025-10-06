@@ -31,6 +31,9 @@ def view_footstep_cost_map(
     vmax: float | None = None,
     save_figure: bool = False,
     show_indices: bool = False,
+    tick_skip: int = 2,
+    show_ticks: bool = True,
+    tick_rotations: tuple[float, float] = (0, 0)
 ) -> None:
     """Visualize the footstep cost map.
 
@@ -64,22 +67,28 @@ def view_footstep_cost_map(
         axes.append(ax)
         ax.set_title(titles[i])
         # only show ticks on the left and bottom
-        if i in [2, 3]:
+        if i in [2, 3] and show_ticks:
             x_ticks = [x for x in range(fs._depricated_grid_size[0])]
             x_labels = [fs._depricated_grid_resolution * (x - fs._depricated_grid_size[0] // 2) for x in range(fs._depricated_grid_size[0])]
             x_labels = [f"{xl:.2f}" for xl in x_labels]
-            x_ticks = x_ticks[::2]
-            x_labels = x_labels[::2]
+            x_ticks = x_ticks[::tick_skip]
+            x_labels = x_labels[::tick_skip]
             ax.set_xticks(x_ticks, x_labels)
+            # rotate x tick labels
+            for tick in ax.get_xticklabels():
+                tick.set_rotation(tick_rotations[0])
         else:
             ax.set_xticks([])
-        if i in [0, 2]:
+        if i in [0, 2] and show_ticks:
             y_ticks = [y for y in range(fs._depricated_grid_size[1])]
             y_labels = [fs._depricated_grid_resolution * (y - fs._depricated_grid_size[1] // 2) for y in range(fs._depricated_grid_size[1])]
             y_labels = [f"{yl:.2f}" for yl in y_labels]
-            y_ticks = y_ticks[::2]
-            y_labels = y_labels[::2]
+            y_ticks = y_ticks[::tick_skip]
+            y_labels = y_labels[::tick_skip]
             ax.set_yticks(y_ticks, y_labels)
+            # rotate y tick labels
+            for tick in ax.get_yticklabels():
+                tick.set_rotation(tick_rotations[1])
         else:
             ax.set_yticks([])
         im = ax.imshow(

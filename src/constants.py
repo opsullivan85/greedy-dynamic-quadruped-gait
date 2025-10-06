@@ -51,7 +51,7 @@ class _GaitNet:
     """Number of footstep options to provide per leg"""
     cspace_dialation: int = 2
     """Number of times to apply max-pooling to the height scan to simulate c-space dialation"""
-    upscale_costmap_noise: float = 0.1
+    upscale_costmap_noise: float = 0.15
     """Amount of noise (+/-) to add to the costmap during upscale"""
     valid_height_range: tuple[float, float] = (-0.5, 0)
     """(min, max) valid height range for footstep options.

@@ -19,6 +19,7 @@ from src.gaitnet.actions.mpc_action import ManagerBasedEnv
 from src.gaitnet.env_cfg.observations import get_terrain_mask
 from src.simulation.cfg.footstep_scanner_constants import idx_to_xy
 from src.util.math import seeded_uniform_noise
+from src.contactnet.debug import view_footstep_cost_map
 from src import get_logger
 
 logger = get_logger()
@@ -159,6 +160,31 @@ class FootstepOptionGenerator:
 
         return best_options, best_values
 
+    def _apply_options_to_cost_map(
+        self, cost_map: torch.Tensor, options: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Apply the selected footstep options to the cost map.
+
+        Args:
+            cost_map: (num_envs, 4, H, W) filtered cost maps for each leg
+            options: (num_envs, num_options, 3) footstep options as (leg_idx, dx, dy)
+
+        Returns:
+            torch.Tensor: Updated cost map with applied footstep options.
+        """
+        zero = idx_to_xy(torch.tensor([0, 0], device=options.device))
+        one = idx_to_xy(torch.tensor([1, 1], device=options.device))
+        slope = (one[0] - zero[0], one[1] - zero[1])
+        intercept = (zero[0], zero[1])
+        # Apply each footstep option to the cost map
+        for leg_idx, dx, dy in options[0, :-1]:  # exclude the NO_STEP option
+            idx = torch.round((dx - intercept[0]) / slope[0]).long()
+            idy = torch.round((dy - intercept[1]) / slope[1]).long()
+            cost_map[0, int(leg_idx), idx, idy] = -0.3  # Set cost for selected options
+
+        return cost_map
+
     def get_footstep_options(self, obs: torch.Tensor) -> torch.Tensor:
         """
         Generate footstep options based on the current environment state.
@@ -177,10 +203,11 @@ class FootstepOptionGenerator:
         # switch from (FL, FR, RL, RR) to (FR, FL, RR, RL)
         cost_maps = cost_maps[:, [1, 0, 3, 2], :, :]
 
-        # save_img(
-        #     cost_maps[0, 0].cpu().numpy(),
-        #     name="raw_cost_map_FR",
-        #     cmap_limits=(-1, 1),
+        # view_footstep_cost_map(
+        #     cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
+        #     title="Default Footstep Cost Map",
+        #     save_figure=True,
+        #     show_ticks=False,
         # )
 
         # interpolate cost map
@@ -193,6 +220,13 @@ class FootstepOptionGenerator:
             1
         )  # (num_envs, 4, H, W)
 
+        # view_footstep_cost_map(
+        #     cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
+        #     title="Scaled Footstep Cost Map",
+        #     save_figure=True,
+        #     show_ticks=False,
+        # )
+
         # apply determanistic noise to costmap to slightly spread apart the best options
         # it is important that this is reproducable for the RL algorithm
         noise = seeded_uniform_noise(cost_maps, cost_maps.shape[1:])
@@ -202,35 +236,40 @@ class FootstepOptionGenerator:
         )
         cost_maps += noise
 
-        # save_img(
-        #     cost_maps[0, 0].cpu().numpy(),
-        #     name="interpolated_cost_map_FR",
-        # )
-        # save_img(
-        #     cost_maps[0, 1].cpu().numpy(),
-        #     name="interpolated_cost_map_FL",
-        # )
-        # save_img(
-        #     cost_maps[0, 2].cpu().numpy(),
-        #     name="interpolated_cost_map_RL",
-        # )
-        # save_img(
-        #     cost_maps[0, 3].cpu().numpy(),
-        #     name="interpolated_cost_map_RR",
+        # view_footstep_cost_map(
+        #     cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
+        #     title="Noisy Footstep Cost Map",
+        #     save_figure=True,
+        #     show_ticks=False,
         # )
 
         masked_cost_maps = self._filter_cost_map(cost_maps, obs)  # (num_envs, 4, H, W)
 
-        # save_img(
-        #     cost_maps[0, 0].cpu().numpy(),
-        #     name="masked_cost_map_FR",
-        #     cmap_limits=(-1, 1),
+        # view_footstep_cost_map(
+        #     masked_cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
+        #     title="Masked Footstep Cost Map",
+        #     save_figure=True,
+        #     # show_ticks=False,
+        #     tick_skip=4,
+        #     tick_rotations=(90, 0)
         # )
 
         # best_options, best_values = self._overall_best_options(masked_cost_maps, self.num_options)
         best_options, best_values = self._best_options_per_leg(
             masked_cost_maps, self.options_per_leg
         )
+
+        # applied_map = self._apply_options_to_cost_map(
+        #     masked_cost_maps, best_options
+        # )
+        # view_footstep_cost_map(
+        #     applied_map[0][[1, 0, 3, 2]].cpu().numpy(),
+        #     title="Applied Footstep Cost Map",
+        #     save_figure=True,
+        #     # show_ticks=False,
+        #     tick_skip=4,
+        #     tick_rotations=(90, 0)
+        # )
 
         # replace any options with inf cost with NO_STEP option and 0 cost
         inf_mask = torch.isinf(best_values)  # (num_envs, num_options)
