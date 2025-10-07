@@ -130,8 +130,6 @@ class GaitnetActor(nn.Module):
             # check if this is a no-op state
             # note that the one hot encoding is [no_op, leg1, leg2, leg3, leg4]
             no_op_mask = unique_state[:, 0] == 1
-            # also treat high cost as no-op
-            no_op_mask = no_op_mask | (unique_state[:, -1] >= 2.0)
 
             unique_embedding = torch.zeros(
                 (num_envs, self.unique_embedding_size), device=obs.device
@@ -399,11 +397,24 @@ class GaitnetActorCritic(ActorCritic):
         # Cache duration means for later use
         self._cached_duration_means = duration_means
         
-        # Create discrete distribution for action selection
-        self.discrete_distribution = Categorical(logits=logits)
+        # remove all but the last no-op so it doesn't affect probabilities
+        obs_start = 22  # shared_state_size
+        unique_state_size = 8
+        num_options = logits.shape[1]
+        # Reshape to get per-option state
+        action_candidates = observations[:, obs_start:].view(
+            observations.shape[0], num_options, unique_state_size
+        )
+        # Mask: True for valid actions, False for no-ops or high cost
+        no_op_mask = action_candidates[:, :, 0] == 1
+        # Apply mask to logits (set invalid actions to -inf so they get 0 probability)
+        masked_logits = logits.clone()
+        masked_logits[no_op_mask] = float('-inf')
+        masked_logits[:, -1] = logits[:, -1]  # always allow the last no-op option
+        
+        self.discrete_distribution = Categorical(logits=masked_logits)
         
         # Create continuous distribution for durations
-        # Each option has its own duration distribution with fixed std
         duration_std = torch.full_like(duration_means, self.duration_std)
         self.duration_distribution = Normal(duration_means, duration_std)
     

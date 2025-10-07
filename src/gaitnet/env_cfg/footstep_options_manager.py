@@ -299,8 +299,8 @@ class FootstepOptionGenerator:
 
         # shuffle the options to prevent any bias from ordering
         # this is important because the policy might learn to ignore certain indices
-        shuffle_indices = torch.randperm(result.shape[1], device=result.device)
-        result = result[:, shuffle_indices, :]
+        # shuffle_indices = torch.randperm(result.shape[1], device=result.device)
+        # result = result[:, shuffle_indices, :]
         return result
 
 
