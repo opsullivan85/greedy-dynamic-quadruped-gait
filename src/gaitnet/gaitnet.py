@@ -286,7 +286,7 @@ class GaitnetActorCritic(ActorCritic):
         critic: GaitnetCritic,
         init_noise_std=1.0,
         noise_std_type: str = "scalar",
-        duration_std: float = 0.05,  # Standard deviation for duration noise
+        duration_std: float = 0.01,  # Standard deviation for duration noise
     ):
         nn.Module.__init__(self)
         logger.info("GaitnetActorCritic initializing")
