@@ -124,15 +124,23 @@ def main():
         "algorithm": {
             "class_name": "PPO",
             "schedule": "fixed",  # we don't support adaptive
-            "clip_param": 0.2,
-            "num_learning_epochs": 5,
+            # specified the proximal part of PPO - larger = faster at cost of stability
+            "clip_param": 0.3,
+            # how many times to use each batch of data for gradient updates
+            "num_learning_epochs": 8,
+            # number of minibatches to split one batch of data into
             "num_mini_batches": 4,
             "value_loss_coef": 0.5,
-            "entropy_coef": 0.01,
-            "learning_rate": 1e-4,
+            # controls entropy - higher = more exploration, slower convergence
+            "entropy_coef": 0.02,
+            # learning rate
+            "learning_rate": 3e-4,
+            # clips gradients to prevent unstable training
             "max_grad_norm": 1.0,
             "use_clipped_value_loss": True,
-            "gamma": 0.99,
+            # decay rate of future rewards. Closer to 1 = long horizon, closer to 0 = short horizon
+            # H=1/(1-gamma); 0.98 corresponds to 2s
+            "gamma": 0.98,
             "lam": 0.95,
         },
         "policy": {
