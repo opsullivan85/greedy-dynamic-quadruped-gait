@@ -192,15 +192,18 @@ class ObservationsCfg:
             params={"sensor_cfg": SceneEntityCfg("FL_foot_scanner")},
         )
 
+        # Based on everything I understood, these next two should be the other
+        # order, but looking at the debug graphs this is correct.
+        RR_foot_scanner = ObsTerm(
+            func=cspace_height_scan,
+            params={"sensor_cfg": SceneEntityCfg("RR_foot_scanner")},
+        )
+
         RL_foot_scanner = ObsTerm(
             func=cspace_height_scan,
             params={"sensor_cfg": SceneEntityCfg("RL_foot_scanner")},
         )
 
-        RR_foot_scanner = ObsTerm(
-            func=cspace_height_scan,
-            params={"sensor_cfg": SceneEntityCfg("RR_foot_scanner")},
-        )
 
         def __post_init__(self):
             self.enable_corruption = False
