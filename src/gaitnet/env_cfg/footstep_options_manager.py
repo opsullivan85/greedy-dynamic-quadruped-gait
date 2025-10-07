@@ -398,6 +398,7 @@ class FootstepObservationManager(ObservationManager):
 
         Returns:
             torch.Tensor: One-hot encoded footstep options of shape (num_envs, options_per_leg*4, embedding_dim)
+                where the no-op option is the first index in the one-hot encoding.
         """
         num_envs, num_options, _ = options.shape
         embedding_dim = const.robot.num_legs + 1

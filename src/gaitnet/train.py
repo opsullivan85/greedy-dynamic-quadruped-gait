@@ -85,19 +85,20 @@ def main():
 
     gaitnet_actor = gaitnet.GaitnetActor(
         shared_state_dim=shared_size,
-        shared_layer_sizes=[128, 128],
+        shared_layer_sizes=[128, 128, 128],
         unique_state_dim=unique_size,
         unique_layer_sizes=[64, 64],
-        trunk_layer_sizes=[128],
+        trunk_layer_sizes=[128, 128, 128],
     ).to(args_cli.device)
 
     gaitnet_critic = gaitnet.GaitnetCritic(
         shared_state_dim=shared_size,
-        shared_layer_sizes=[128, 128],
+        shared_layer_sizes=[128, 128, 128],
         num_unique_states=const.gait_net.num_footstep_options*const.robot.num_legs+1,  # +1 for the "no step" option
         unique_state_dim=unique_size,
         unique_layer_sizes=[64, 64],
-        trunk_layer_sizes=[128],
+        trunk_layer_sizes=[128, 128, 128],
+        trunk_combiner_head_sizes=[64, 64],
     ).to(args_cli.device)
 
     actor_critic_class = gaitnet.GaitnetActorCritic
