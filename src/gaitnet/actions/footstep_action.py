@@ -45,17 +45,6 @@ class FSCActionTerm(ActionTerm):
             (self.num_envs, self.action_dim), device=self.device
         )
         self._processed_actions = self._raw_actions
-        
-        # Store reference to actor wrapper for duration retrieval
-        self._actor_wrapper = None
-
-    def set_actor_wrapper(self, actor_wrapper):
-        """Set the actor wrapper reference for duration retrieval.
-        
-        Args:
-            actor_wrapper: The GaitnetActorWrapper instance
-        """
-        self._actor_wrapper = actor_wrapper
     
     def _get_option_manager(self) -> "FootstepObservationManager":
         """Get the footstep option manager.
@@ -72,9 +61,9 @@ class FSCActionTerm(ActionTerm):
     def action_dim(self) -> int:
         """Dimension of the action term.
         
-        Returns a single integer representing one action index (0-16).
+        Returns 2: action index (0-16) and duration value.
         """
-        return 1  # We select 1 action index
+        return 2  # Action index + duration
 
     @property
     def raw_actions(self) -> torch.Tensor:
@@ -108,37 +97,40 @@ class FSCActionTerm(ActionTerm):
             "duration": processed_actions[:, 3],
         }
 
-    def action_indices_to_actions(self, action_indices: torch.Tensor) -> torch.Tensor:
-        """Convert action indices to footstep actions.
+    def action_indices_to_actions(self, actions: torch.Tensor) -> torch.Tensor:
+        """Convert actions (index + duration) to footstep actions.
 
         Args:
-            action_indices: The action indices from the policy. (num_envs,) or (num_envs, 1) with integer values 0-16
+            actions: The actions from the policy. (num_envs, 2) where:
+                     - Column 0: action index (0-16)
+                     - Column 1: duration value
 
         Returns:
             Footstep actions.
             (num_envs, 4) where each action is (leg, x, y, duration)
         """
-        # Get the footstep options and actions from the observation manager
+        # Extract action indices and durations
+        action_indices = actions[:, 0].long()  # (num_envs,)
+        durations = actions[:, 1]  # (num_envs,)
+        
+        # Get the footstep options from the observation manager
         footstep_option_manager: "FootstepObservationManager" = (
             self._get_option_manager()
         )
-        all_actions = footstep_option_manager.footstep_actions  # (num_envs, 17, 4)
+        all_options = footstep_option_manager.footstep_options  # (num_envs, 17, 4) - last column is cost
         
-        # Flatten action_indices if it has shape (num_envs, 1)
-        if action_indices.dim() > 1:
-            action_indices = action_indices.squeeze(-1)
-        
-        # action_indices shape: (num_envs,)
-        # all_actions shape: (num_envs, 17, 4)
-        
-        # Use proper indexing to select the actions
+        # Use proper indexing to select the options (leg, x, y, cost)
         batch_size = action_indices.shape[0]
         batch_indices = torch.arange(batch_size, device=self.device)
         
-        # Gather the selected actions
-        selected_actions = all_actions[batch_indices, action_indices]  # (num_envs, 4)
+        # Gather the selected options (leg, x, y, cost)
+        selected_options = all_options[batch_indices, action_indices]  # (num_envs, 4)
         
-        return selected_actions  # (num_envs, 4)
+        # Replace the cost (column 3) with the duration from the policy
+        selected_actions = selected_options.clone()
+        selected_actions[:, 3] = durations
+        
+        return selected_actions  # (num_envs, 4) - (leg, x, y, duration)
 
     def process_actions(self, actions: torch.Tensor):
         """Processes the actions sent to the environment.
@@ -147,18 +139,14 @@ class FSCActionTerm(ActionTerm):
             This function is called once per environment step by the manager.
 
         Args:
-            actions: The action indices from the policy (num_envs,) or (num_envs, 1)
+            actions: The actions from the policy (num_envs, 2) where:
+                     - Column 0: action index (0-16)
+                     - Column 1: duration value
         """
         # Store raw actions
         self._raw_actions = actions
         
-        # Get durations from the actor wrapper if available
-        if self._actor_wrapper is not None and hasattr(self._actor_wrapper, '_cached_durations'):
-            durations = self._actor_wrapper.get_durations_for_actions(actions)
-            footstep_option_manager = self._get_option_manager()
-            footstep_option_manager.set_footstep_actions(actions, durations)
-        
-        # Convert action indices to footstep actions
+        # Convert actions (index + duration) to footstep actions (leg, x, y, duration)
         self._processed_actions = self.action_indices_to_actions(actions)
         processed_actions_cpu = self.processed_actions.cpu().numpy()
 

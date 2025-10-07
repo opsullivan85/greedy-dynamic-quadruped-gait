@@ -156,9 +156,10 @@ class GaitnetActor(nn.Module):
         logits = self.value_head(trunk_output).squeeze(-1)  # (num_envs, num_options)
         duration = self.duration_head(trunk_output).squeeze(-1)  # (num_envs, num_options)
         
-        # Scale durations to reasonable range (e.g., 0.1 to 0.5 seconds)
-        # Using sigmoid to map to [0, 1], then scale to [0.1, 0.5]
-        duration = torch.sigmoid(duration) * 0.4 + 0.1
+        # Scale durations to reasonable range
+        min_dur, max_dur = const.gait_net.valid_swing_duration_range
+        scale = max_dur - min_dur
+        duration = torch.sigmoid(duration) * scale + min_dur
 
         return logits, duration
 
@@ -275,71 +276,17 @@ class GaitnetCritic(nn.Module):
         return value
 
 
-class GaitnetActorWrapper(nn.Module):
-    """Wrap a GaitnetActor to handle duration storage for selected actions."""
-
-    def __init__(self, actor: GaitnetActor, env: FootstepOptionEnv):
-        super().__init__()
-        self._actor = actor
-        self._env = env
-        self._cached_durations = None
-
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        """Forward pass that returns logits and caches durations.
-        
-        Args:
-            obs: Observations (num_envs, obs_dim)
-            
-        Returns:
-            logits: Action selection logits (num_envs, num_options)
-        """
-        logits, durations = self._actor(obs)
-        # Cache durations for use after action selection
-        self._cached_durations = durations
-        return logits
-    
-    def get_durations_for_actions(self, action_indices: torch.Tensor) -> torch.Tensor:
-        """Get the durations for the selected action indices.
-        
-        Args:
-            action_indices: Selected action indices (num_envs,) or (num_envs, 1)
-            
-        Returns:
-            durations: Durations for selected actions (num_envs,)
-        """
-        if self._cached_durations is None:
-            raise RuntimeError("No cached durations available. Call forward() first.")
-        
-        # Flatten action_indices if it has shape (num_envs, 1)
-        if action_indices.dim() > 1:
-            action_indices = action_indices.squeeze(-1)
-        
-        batch_size = action_indices.shape[0]
-        batch_indices = torch.arange(batch_size, device=action_indices.device)
-        
-        # Gather durations for the selected actions
-        selected_durations = self._cached_durations[batch_indices, action_indices]
-        
-        return selected_durations
-    
-    def __getattr__(self, name):
-        """Delegate attribute access to the wrapped actor."""
-        try:
-            return super().__getattr__(name)
-        except AttributeError:
-            return getattr(self._actor, name)
-
-
 class GaitnetActorCritic(ActorCritic):
     def __init__(
         self,
         num_actor_obs,
         num_critic_obs,
         num_actions,
-        actor: GaitnetActorWrapper,
+        actor: GaitnetActor,
         critic: GaitnetCritic,
         init_noise_std=1.0,
         noise_std_type: str = "scalar",
+        duration_std: float = 0.05,  # Standard deviation for duration noise
     ):
         nn.Module.__init__(self)
         logger.info("GaitnetActorCritic initializing")
@@ -356,11 +303,17 @@ class GaitnetActorCritic(ActorCritic):
         # Store the number of options (should match num_actions from environment)
         self.num_options = const.gait_net.num_footstep_options * const.robot.num_legs + 1  # +1 for no-op
 
-        # Action distribution (populated in update_distribution)
-        self.distribution: Categorical | None = None
+        # Action distribution components (populated in update_distribution)
+        self.discrete_distribution: Categorical | None = None  # For action selection
+        self.duration_distribution: Normal | None = None  # For duration values
         
-        # Cache for storing selected action indices
+        # Duration standard deviation (fixed for now, could be learned)
+        self.duration_std = duration_std
+        
+        # Cache for storing selected action indices and durations
         self._last_action_indices: torch.Tensor | None = None
+        self._last_sampled_durations: torch.Tensor | None = None
+        self._cached_duration_means: torch.Tensor | None = None
 
     def reset(self, dones=None):
         """Reset recurrent states (no-op for non-recurrent policy)."""
@@ -373,45 +326,85 @@ class GaitnetActorCritic(ActorCritic):
     def action_mean(self):
         """Return the mean of the distribution (for logging).
         
-        For Categorical distribution, returns the mode (most likely action).
-        Returns shape (num_envs, 1) to match action shape.
+        Returns shape (num_envs, 2) with:
+        - Column 0: discrete action index (mode of categorical)
+        - Column 1: duration mean for the most likely action
         """
-        if self.distribution is None:
+        if self.discrete_distribution is None or self.duration_distribution is None:
             raise RuntimeError("Distribution not initialized. Call update_distribution first.")
-        # Get the mode (argmax of logits/probs) and reshape to (num_envs, 1)
-        return torch.argmax(self.distribution.logits, dim=-1, keepdim=True).float()
+        
+        # Get the mode (argmax) of the discrete distribution
+        discrete_mode = torch.argmax(self.discrete_distribution.logits, dim=-1)  # (num_envs,)
+        
+        # Get duration mean for the most likely action
+        batch_size = discrete_mode.shape[0]
+        batch_indices = torch.arange(batch_size, device=discrete_mode.device)
+        duration_mean = self.duration_distribution.mean[batch_indices, discrete_mode]  # (num_envs,)
+        
+        return torch.stack([discrete_mode.float(), duration_mean], dim=-1)  # (num_envs, 2)
     
     @property
     def action_std(self):
-        """Return dummy std for logging compatibility with PPO.
+        """Return std for logging compatibility with PPO.
         
-        Returns shape (num_envs, 1) to match action shape.
-        Categorical distribution doesn't have a traditional std, so we return ones.
+        Returns shape (num_envs, 2) with:
+        - Column 0: dummy std for discrete action (set to 1.0)
+        - Column 1: duration std
         """
-        if self.distribution is None:
-            return torch.ones(1)
-        # Return ones with shape (num_envs, 1)
-        num_envs = self.distribution.logits.shape[0]
-        return torch.ones(num_envs, 1, device=self.distribution.logits.device)
+        if self.discrete_distribution is None or self.duration_distribution is None:
+            return torch.ones(1, 2)
+        
+        num_envs = self.discrete_distribution.logits.shape[0]
+        device = self.discrete_distribution.logits.device
+        
+        # Dummy std for discrete action
+        discrete_std = torch.ones(num_envs, 1, device=device)
+        
+        # Duration std (constant for all options)
+        duration_std = torch.full((num_envs, 1), self.duration_std, device=device)
+        
+        return torch.cat([discrete_std, duration_std], dim=-1)
     
     @property
     def entropy(self):
-        """Return the entropy of the distribution."""
-        if self.distribution is None:
+        """Return the entropy of the joint distribution.
+        
+        For independent discrete and continuous components, total entropy is the sum.
+        """
+        if self.discrete_distribution is None or self.duration_distribution is None:
             raise RuntimeError("Distribution not initialized. Call update_distribution first.")
-        return self.distribution.entropy()
+        
+        discrete_entropy = self.discrete_distribution.entropy()  # (num_envs,)
+        # For duration, sum entropy across all options (since we condition on action selection)
+        duration_entropy = self.duration_distribution.entropy().mean(dim=-1)  # (num_envs,)
+        
+        return discrete_entropy + duration_entropy
     
     def update_distribution(self, observations):
         """Update the action distribution based on observations.
         
+        Creates a joint distribution over:
+        1. Discrete action selection (Categorical)
+        2. Continuous duration for each action (Normal)
+        
         Args:
             observations: Observations (num_envs, obs_dim)
         """
-        # Get logits from actor
-        logits = self.actor(observations)  # (num_envs, num_options=17)
+        # Get logits and duration means from actor
+        logits, duration_means = self.actor(observations)  # Access underlying actor
+        # logits: (num_envs, num_options)
+        # duration_means: (num_envs, num_options)
         
-        # Create Categorical distribution
-        self.distribution = Categorical(logits=logits)
+        # Cache duration means for later use
+        self._cached_duration_means = duration_means
+        
+        # Create discrete distribution for action selection
+        self.discrete_distribution = Categorical(logits=logits)
+        
+        # Create continuous distribution for durations
+        # Each option has its own duration distribution with fixed std
+        duration_std = torch.full_like(duration_means, self.duration_std)
+        self.duration_distribution = Normal(duration_means, duration_std)
     
     def act(self, observations, **kwargs):
         """Sample actions from the policy.
@@ -420,33 +413,69 @@ class GaitnetActorCritic(ActorCritic):
             observations: Observations (num_envs, obs_dim)
             
         Returns:
-            action_index: Sampled action index (num_envs,) with integer values 0-16
+            actions: Sampled actions (num_envs, 2) where:
+                     - Column 0: discrete action index (0-16)
+                     - Column 1: sampled duration value
         """
         self.update_distribution(observations)
-        action_index = self.distribution.sample().unsqueeze(-1)  # (num_envs, 1)
         
-        # Cache the action index for duration lookup
+        # Sample discrete action
+        action_index = self.discrete_distribution.sample()  # (num_envs,)
+        
+        # Sample duration for the selected action
+        batch_size = action_index.shape[0]
+        batch_indices = torch.arange(batch_size, device=action_index.device)
+        
+        # Sample from the duration distribution for the selected action
+        sampled_durations = self.duration_distribution.sample()[batch_indices, action_index]  # (num_envs,)
+        
+        # Combine action index and duration into a single tensor
+        actions = torch.stack([action_index.float(), sampled_durations], dim=-1)  # (num_envs, 2)
+        
+        # Cache for log probability computation
         self._last_action_indices = action_index
+        self._last_sampled_durations = sampled_durations
         
-        return action_index
+        return actions
     
     def get_actions_log_prob(self, actions):
         """Get log probability of actions under current distribution.
         
+        This computes the JOINT log probability of:
+        1. Selecting the discrete action
+        2. Sampling the duration for that action
+        
         Args:
-            actions: Action indices (num_envs,) or (num_envs, 1)
+            actions: Actions (num_envs, 2) where:
+                     - Column 0: discrete action index (0-16)
+                     - Column 1: sampled duration value
             
         Returns:
-            log_probs: Log probabilities (num_envs,)
+            log_probs: Joint log probabilities (num_envs,)
         """
-        if self.distribution is None:
+        if self.discrete_distribution is None or self.duration_distribution is None:
             raise RuntimeError("Distribution not initialized. Call update_distribution first.")
         
-        # Flatten actions if it has shape (num_envs, 1)
-        if actions.dim() > 1:
-            actions = actions.squeeze(-1)
+        # Extract action indices and durations
+        action_indices = actions[:, 0].long()  # (num_envs,)
+        sampled_durations = actions[:, 1]  # (num_envs,)
         
-        return self.distribution.log_prob(actions)
+        # Get log probability of discrete action selection
+        discrete_log_prob = self.discrete_distribution.log_prob(action_indices)  # (num_envs,)
+        
+        # Get log probability of duration for the selected action
+        batch_size = action_indices.shape[0]
+        batch_indices = torch.arange(batch_size, device=action_indices.device)
+        
+        # Evaluate log probability of these durations under the Normal distribution
+        # duration_distribution has shape (num_envs, num_options)
+        # We need to evaluate sampled_durations under the distribution for the selected action
+        duration_log_prob = self.duration_distribution.log_prob(sampled_durations.unsqueeze(-1))[batch_indices, action_indices]
+        
+        # Joint log probability is the sum (since they're independent given the action)
+        joint_log_prob = discrete_log_prob + duration_log_prob
+        
+        return joint_log_prob
     
     def act_inference(self, observations):
         """Deterministic action selection for inference.
@@ -455,12 +484,25 @@ class GaitnetActorCritic(ActorCritic):
             observations: Observations (num_envs, obs_dim)
             
         Returns:
-            action_index: Most likely action index (num_envs,)
+            actions: Deterministic actions (num_envs, 2) where:
+                     - Column 0: discrete action index (0-16)
+                     - Column 1: mean duration value
         """
-        logits = self.actor(observations)
+        # Get logits and durations from actor
+        logits, duration_means = self.actor(observations)
+        
         # Select action with highest logit (deterministic)
-        action_index = torch.argmax(logits, dim=-1)
-        return action_index.unsqueeze(-1)  # (num_envs, 1)
+        action_index = torch.argmax(logits, dim=-1)  # (num_envs,)
+        
+        # Use mean durations for the selected action (deterministic)
+        batch_size = action_index.shape[0]
+        batch_indices = torch.arange(batch_size, device=action_index.device)
+        selected_durations = duration_means[batch_indices, action_index]  # (num_envs,)
+        
+        # Combine action index and duration into a single tensor
+        actions = torch.stack([action_index.float(), selected_durations], dim=-1)  # (num_envs, 2)
+        
+        return actions
     
     def evaluate(self, critic_observations, **kwargs):
         """Evaluate the value function.
