@@ -72,10 +72,9 @@ class FSCActionTerm(ActionTerm):
     def action_dim(self) -> int:
         """Dimension of the action term.
         
-        Returns the number of action indices we select (k=2 for top-2 selection),
-        not the number of available options (17).
+        Returns a single integer representing one action index (0-16).
         """
-        return 2  # We select top-2 action indices
+        return 1  # We select 1 action index
 
     @property
     def raw_actions(self) -> torch.Tensor:
@@ -113,11 +112,11 @@ class FSCActionTerm(ActionTerm):
         """Convert action indices to footstep actions.
 
         Args:
-            action_indices: The action indices from the policy. (num_envs, k) where k=2
+            action_indices: The action indices from the policy. (num_envs,) or (num_envs, 1) with integer values 0-16
 
         Returns:
             Footstep actions.
-            (num_envs, 2, 4) where each action is (leg, x, y, duration)
+            (num_envs, 4) where each action is (leg, x, y, duration)
         """
         # Get the footstep options and actions from the observation manager
         footstep_option_manager: "FootstepObservationManager" = (
@@ -125,30 +124,21 @@ class FSCActionTerm(ActionTerm):
         )
         all_actions = footstep_option_manager.footstep_actions  # (num_envs, 17, 4)
         
-        # action_indices shape: (num_envs, 2)
+        # Flatten action_indices if it has shape (num_envs, 1)
+        if action_indices.dim() > 1:
+            action_indices = action_indices.squeeze(-1)
+        
+        # action_indices shape: (num_envs,)
         # all_actions shape: (num_envs, 17, 4)
         
         # Use proper indexing to select the actions
-        batch_size, k = action_indices.shape
-        batch_indices = torch.arange(batch_size, device=self.device).unsqueeze(1).expand(-1, k)
+        batch_size = action_indices.shape[0]
+        batch_indices = torch.arange(batch_size, device=self.device)
         
         # Gather the selected actions
-        selected_actions = all_actions[batch_indices, action_indices]  # (num_envs, 2, 4)
+        selected_actions = all_actions[batch_indices, action_indices]  # (num_envs, 4)
         
-        # Handle no-op logic: if first action is no-op, make second one no-op too
-        selected_actions[:, 1, 0] = torch.where(
-            selected_actions[:, 0, 0] == NO_STEP, 
-            NO_STEP, 
-            selected_actions[:, 1, 0]
-        )
-        # Zero out the x, y, duration of no-op actions for the second action
-        selected_actions[:, 1, 1:4] = torch.where(
-            selected_actions[:, 1, 0].unsqueeze(1) == NO_STEP,
-            torch.zeros_like(selected_actions[:, 1, 1:4]),
-            selected_actions[:, 1, 1:4],
-        )
-        
-        return selected_actions  # (num_envs, 2, 4)
+        return selected_actions  # (num_envs, 4)
 
     def process_actions(self, actions: torch.Tensor):
         """Processes the actions sent to the environment.
@@ -157,7 +147,7 @@ class FSCActionTerm(ActionTerm):
             This function is called once per environment step by the manager.
 
         Args:
-            actions: The action indices from the policy (num_envs, k)
+            actions: The action indices from the policy (num_envs,) or (num_envs, 1)
         """
         # Store raw actions
         self._raw_actions = actions
@@ -172,21 +162,20 @@ class FSCActionTerm(ActionTerm):
         self._processed_actions = self.action_indices_to_actions(actions)
         processed_actions_cpu = self.processed_actions.cpu().numpy()
 
-        # iterate over the second axis of processed_actions
-        for i in range(processed_actions_cpu.shape[1]):
-            action = processed_actions_cpu[:, i, :]  # (num_envs, 4)
-            
-            # mask out invalid steps
-            mask = action[:, 0] != NO_STEP
-            footstep_parameters = self.footstep_kwargs(action)
+        # processed_actions is now (num_envs, 4) - single action per env
+        action = processed_actions_cpu  # (num_envs, 4)
+        
+        # mask out invalid steps
+        mask = action[:, 0] != NO_STEP
+        footstep_parameters = self.footstep_kwargs(action)
 
-            # initiate the footsteps
-            robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.env_cfg.robot_controllers  # type: ignore
-            robot_controllers.call(
-                function=sim2real.Sim2RealInterface.initiate_footstep,
-                mask=mask,
-                **footstep_parameters,
-            )
+        # initiate the footsteps
+        robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.env_cfg.robot_controllers  # type: ignore
+        robot_controllers.call(
+            function=sim2real.Sim2RealInterface.initiate_footstep,
+            mask=mask,
+            **footstep_parameters,
+        )
 
     def apply_actions(self):
         """Applies the actions to the asset managed by the term.

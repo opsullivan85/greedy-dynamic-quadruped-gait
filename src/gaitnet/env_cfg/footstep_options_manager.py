@@ -345,16 +345,19 @@ class FootstepObservationManager(ObservationManager):
         This is called after action selection to attach durations to the selected options.
 
         Args:
-            action_indices (torch.Tensor): Selected action indices of shape (num_envs, k).
-            durations (torch.Tensor): Footstep durations for selected actions, shape (num_envs, k).
+            action_indices (torch.Tensor): Selected action indices of shape (num_envs,) or (num_envs, 1).
+            durations (torch.Tensor): Footstep durations for selected actions, shape (num_envs,).
         """
         # Create full action tensor from options
         self._footstep_actions = self.footstep_options.clone()
         
-        # Set durations for all options (we'll only use the selected ones)
-        # For simplicity, we update durations for the indices that were selected
-        batch_size, k = action_indices.shape
-        batch_indices = torch.arange(batch_size, device=action_indices.device).unsqueeze(1).expand(-1, k)
+        # Flatten action_indices if it has shape (num_envs, 1)
+        if action_indices.dim() > 1:
+            action_indices = action_indices.squeeze(-1)
+        
+        # Set durations for the selected options
+        batch_size = action_indices.shape[0]
+        batch_indices = torch.arange(batch_size, device=action_indices.device)
         
         # Update durations at the selected indices
         self._footstep_actions[batch_indices, action_indices, 3] = durations

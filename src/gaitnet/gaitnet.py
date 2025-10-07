@@ -6,130 +6,10 @@ from src.gaitnet.actions.footstep_action import Sequence
 from rsl_rl.modules import ActorCritic
 from src import get_logger
 from src.gaitnet.env_cfg.footstep_options_env import FootstepOptionEnv
-from torch.distributions import Normal, Distribution, constraints
+from torch.distributions import Normal, Categorical
 import src.constants as const
 
 logger = get_logger()
-
-
-class TopKCategoricalDistribution(Distribution):
-    """
-    A custom distribution for selecting top-k actions from a set of options.
-    
-    This distribution:
-    - Samples the top-k indices based on logits (non-differentiable sampling)
-    - Computes log_prob differentiably w.r.t. the logits
-    - Maintains compatibility with PPO's training loop
-    """
-    
-    arg_constraints = {}
-    support = constraints.integer_interval(0, float('inf'))
-    has_rsample = False
-    
-    def __init__(self, logits: torch.Tensor, k: int = 2, validate_args=None):
-        """
-        Args:
-            logits: Tensor of shape (batch_size, num_options) with unnormalized log probabilities
-            k: Number of top actions to select
-            validate_args: Whether to validate arguments (for PyTorch distribution interface)
-        """
-        self.k = k
-        self.logits = logits
-        self.num_options = logits.shape[-1]
-        
-        # Convert logits to probabilities for log_prob computation
-        self.probs = F.softmax(logits, dim=-1)
-        
-        # Store log probabilities for numerical stability
-        self.log_probs = F.log_softmax(logits, dim=-1)
-        
-        batch_shape = logits.shape[:-1]
-        event_shape = torch.Size([k])
-        
-        super().__init__(batch_shape, event_shape, validate_args=validate_args)
-    
-    def sample(self, sample_shape=torch.Size()) -> torch.Tensor:
-        """
-        Sample top-k indices based on logits with Gumbel noise for exploration.
-        
-        Uses the Gumbel-Max trick to add stochasticity while biasing toward higher logits.
-        
-        Returns:
-            Tensor of shape (*sample_shape, *batch_shape, k) containing selected indices
-        """
-        if sample_shape != torch.Size():
-            raise NotImplementedError("TopKCategoricalDistribution does not support sample_shape != ()")
-        
-        # Add Gumbel noise for stochastic sampling
-        # Gumbel(0, 1) = -log(-log(Uniform(0, 1)))
-        gumbel_noise = -torch.log(-torch.log(torch.rand_like(self.logits) + 1e-10) + 1e-10)
-        
-        # Add noise to logits (Gumbel-Max trick)
-        perturbed_logits = self.logits + gumbel_noise
-        
-        # Select top-k from perturbed logits
-        _, top_indices = torch.topk(perturbed_logits, k=self.k, dim=-1, sorted=True)
-        
-        return top_indices  # Shape: (batch_size, k)
-    
-    def log_prob(self, actions: torch.Tensor) -> torch.Tensor:
-        """
-        Compute the log probability of selecting the given top-k actions.
-        
-        This uses a differentiable approximation: we treat the selection as independent
-        draws from the categorical distribution over options, which allows gradients
-        to flow back through the logits.
-        
-        Args:
-            actions: Tensor of shape (batch_size, k) containing the selected action indices
-        
-        Returns:
-            Tensor of shape (batch_size,) containing log probabilities
-        """
-        batch_size = actions.shape[0]
-        
-        # Ensure actions are long tensor for indexing
-        actions = actions.long()
-        
-        # Gather log probabilities for the selected actions
-        # actions shape: (batch_size, k)
-        # self.log_probs shape: (batch_size, num_options)
-        
-        # Expand batch indices for gather operation
-        batch_indices = torch.arange(batch_size, device=actions.device).unsqueeze(1).expand(-1, self.k)
-        
-        # Gather the log probabilities of selected actions
-        selected_log_probs = self.log_probs[batch_indices, actions]  # (batch_size, k)
-        
-        # Sum log probabilities across the k selections
-        # This treats selections as independent (approximation for differentiability)
-        total_log_prob = selected_log_probs.sum(dim=-1)  # (batch_size,)
-        
-        return total_log_prob
-    
-    def entropy(self) -> torch.Tensor:
-        """
-        Compute the entropy of the categorical distribution over options.
-        
-        Since we're selecting top-k, we compute the entropy of the underlying
-        categorical distribution that the selections are based on.
-        
-        Returns:
-            Tensor of shape (batch_size,) containing entropy values
-        """
-        # Entropy of categorical distribution: -sum(p * log(p))
-        entropy = -(self.probs * self.log_probs).sum(dim=-1)  # (batch_size,)
-        
-        return entropy
-    
-    @property
-    def mean(self) -> torch.Tensor:
-        """
-        Return the expected action indices (for logging purposes).
-        This returns the top-k indices, which is what would be sampled.
-        """
-        _, top_indices = torch.topk(self.logits, k=self.k, dim=-1, sorted=True)
-        return top_indices.float()  # (batch_size, k)
 
 
 def make_mlp(
@@ -389,7 +269,7 @@ class GaitnetCritic(nn.Module):
         )
         values = self.trunk(trunk_input).squeeze(-1)  # (num_envs, num_unique_states)
         # collapse the values across the unique states to a single value
-        # in theory this part should learn how we are using the output of the actor (topk 2)
+        # in theory this part should learn how we are using the output of the actor (single action selection)
         value = self.trunk_combiner_head(values)  # (num_envs, 1)
 
         return value
@@ -422,16 +302,20 @@ class GaitnetActorWrapper(nn.Module):
         """Get the durations for the selected action indices.
         
         Args:
-            action_indices: Selected action indices (num_envs, k)
+            action_indices: Selected action indices (num_envs,) or (num_envs, 1)
             
         Returns:
-            durations: Durations for selected actions (num_envs, k)
+            durations: Durations for selected actions (num_envs,)
         """
         if self._cached_durations is None:
             raise RuntimeError("No cached durations available. Call forward() first.")
         
-        batch_size, k = action_indices.shape
-        batch_indices = torch.arange(batch_size, device=action_indices.device).unsqueeze(1).expand(-1, k)
+        # Flatten action_indices if it has shape (num_envs, 1)
+        if action_indices.dim() > 1:
+            action_indices = action_indices.squeeze(-1)
+        
+        batch_size = action_indices.shape[0]
+        batch_indices = torch.arange(batch_size, device=action_indices.device)
         
         # Gather durations for the selected actions
         selected_durations = self._cached_durations[batch_indices, action_indices]
@@ -469,14 +353,11 @@ class GaitnetActorCritic(ActorCritic):
         self.actor = actor
         self.critic = critic
         
-        # Number of top actions to select
-        self.k = 2
-        
-        # Store the number of options (should match action_dim from FSCActionTerm)
+        # Store the number of options (should match num_actions from environment)
         self.num_options = const.gait_net.num_footstep_options * const.robot.num_legs + 1  # +1 for no-op
 
         # Action distribution (populated in update_distribution)
-        self.distribution: TopKCategoricalDistribution | None = None
+        self.distribution: Categorical | None = None
         
         # Cache for storing selected action indices
         self._last_action_indices: torch.Tensor | None = None
@@ -490,18 +371,28 @@ class GaitnetActorCritic(ActorCritic):
     
     @property
     def action_mean(self):
-        """Return the mean of the distribution (for logging)."""
+        """Return the mean of the distribution (for logging).
+        
+        For Categorical distribution, returns the mode (most likely action).
+        Returns shape (num_envs, 1) to match action shape.
+        """
         if self.distribution is None:
             raise RuntimeError("Distribution not initialized. Call update_distribution first.")
-        return self.distribution.mean
+        # Get the mode (argmax of logits/probs) and reshape to (num_envs, 1)
+        return torch.argmax(self.distribution.logits, dim=-1, keepdim=True).float()
     
     @property
     def action_std(self):
-        """Return dummy std for logging compatibility with PPO."""
-        # TopK distribution doesn't have a traditional std, return ones for logging
+        """Return dummy std for logging compatibility with PPO.
+        
+        Returns shape (num_envs, 1) to match action shape.
+        Categorical distribution doesn't have a traditional std, so we return ones.
+        """
         if self.distribution is None:
-            return torch.ones(self.num_options)
-        return torch.ones_like(self.distribution.logits[:, :1])
+            return torch.ones(1)
+        # Return ones with shape (num_envs, 1)
+        num_envs = self.distribution.logits.shape[0]
+        return torch.ones(num_envs, 1, device=self.distribution.logits.device)
     
     @property
     def entropy(self):
@@ -510,68 +401,74 @@ class GaitnetActorCritic(ActorCritic):
             raise RuntimeError("Distribution not initialized. Call update_distribution first.")
         return self.distribution.entropy()
     
-    def update_distribution(self, obs):
+    def update_distribution(self, observations):
         """Update the action distribution based on observations.
         
         Args:
-            obs: Observations (num_envs, obs_dim)
+            observations: Observations (num_envs, obs_dim)
         """
         # Get logits from actor
-        logits = self.actor(obs)  # (num_envs, num_options)
+        logits = self.actor(observations)  # (num_envs, num_options=17)
         
-        # Create TopK distribution
-        self.distribution = TopKCategoricalDistribution(logits, k=self.k)
+        # Create Categorical distribution
+        self.distribution = Categorical(logits=logits)
     
-    def act(self, obs, **kwargs):
+    def act(self, observations, **kwargs):
         """Sample actions from the policy.
         
         Args:
-            obs: Observations (num_envs, obs_dim)
+            observations: Observations (num_envs, obs_dim)
             
         Returns:
-            action_indices: Sampled action indices (num_envs, k)
+            action_index: Sampled action index (num_envs,) with integer values 0-16
         """
-        self.update_distribution(obs)
-        action_indices = self.distribution.sample()  # (num_envs, k)
+        self.update_distribution(observations)
+        action_index = self.distribution.sample().unsqueeze(-1)  # (num_envs, 1)
         
-        # Cache the action indices for duration lookup
-        self._last_action_indices = action_indices
+        # Cache the action index for duration lookup
+        self._last_action_indices = action_index
         
-        return action_indices
+        return action_index
     
     def get_actions_log_prob(self, actions):
         """Get log probability of actions under current distribution.
         
         Args:
-            actions: Action indices (num_envs, k)
+            actions: Action indices (num_envs,) or (num_envs, 1)
             
         Returns:
             log_probs: Log probabilities (num_envs,)
         """
         if self.distribution is None:
             raise RuntimeError("Distribution not initialized. Call update_distribution first.")
+        
+        # Flatten actions if it has shape (num_envs, 1)
+        if actions.dim() > 1:
+            actions = actions.squeeze(-1)
+        
         return self.distribution.log_prob(actions)
     
-    def act_inference(self, obs):
+    def act_inference(self, observations):
         """Deterministic action selection for inference.
         
         Args:
-            obs: Observations (num_envs, obs_dim)
+            observations: Observations (num_envs, obs_dim)
             
         Returns:
-            action_indices: Top-k action indices (num_envs, k)
+            action_index: Most likely action index (num_envs,)
         """
-        logits = self.actor(obs)
-        _, top_indices = torch.topk(logits, k=self.k, dim=-1, sorted=True)
-        return top_indices
+        logits = self.actor(observations)
+        # Select action with highest logit (deterministic)
+        action_index = torch.argmax(logits, dim=-1)
+        return action_index.unsqueeze(-1)  # (num_envs, 1)
     
-    def evaluate(self, obs, **kwargs):
+    def evaluate(self, critic_observations, **kwargs):
         """Evaluate the value function.
         
         Args:
-            obs: Observations (num_envs, obs_dim)
+            critic_observations: Observations (num_envs, obs_dim)
             
         Returns:
             values: State values (num_envs, 1)
         """
-        return self.critic(obs)
+        return self.critic(critic_observations)
