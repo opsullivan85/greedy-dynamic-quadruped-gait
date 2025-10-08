@@ -45,11 +45,11 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     # rewards
-    alive = RewTerm(func=mdp.is_alive, weight=0.2)
+    alive = RewTerm(func=mdp.is_alive, weight=0.4   )
     a_foot_in_swing = RewTerm(func=a_foot_in_swing, weight=0.1)
     xy_tracking = RewTerm(
         func=mdp.track_lin_vel_xy_exp,
-        weight=1.0,
+        weight=0.5,
         params={
             "std": 0.5,
             "command_name": "base_velocity",
@@ -57,7 +57,7 @@ class RewardsCfg:
     )
     yaw_tracking = RewTerm(
         func=mdp.track_ang_vel_z_exp,
-        weight=1.0,
+        weight=0.5,
         params={
             "std": 0.5,
             "command_name": "base_velocity",
@@ -66,23 +66,23 @@ class RewardsCfg:
 
     # penalties
     terminating = RewTerm(func=mdp.is_terminated, weight=-200.0)
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.0)
+    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.5)
+    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.1)
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-8.0)
     foot_slip = RewTerm(
         func=spot_mdp.foot_slip_penalty,
-        weight=-1.5,
+        weight=-0.75,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
             "threshold": 1.0,
         },
     )
-    foot_too_low = RewTerm(
-        func=height_below_minimum,
-        weight=-1,
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
-            "minimum_height": 0.0,
-        },
-    )
+    # foot_too_low = RewTerm(
+    #     func=height_below_minimum,
+    #     weight=-1,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
+    #         "minimum_height": 0.0,
+    #     },
+    # )

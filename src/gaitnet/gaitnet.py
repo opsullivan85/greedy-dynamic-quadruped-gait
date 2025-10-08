@@ -206,13 +206,14 @@ class GaitnetCritic(nn.Module):
             hidden_sizes=trunk_layer_sizes,
             output_size=1,
         )
+        logger.info(f"trunk: {self.trunk}")
 
         self.trunk_combiner_head = make_mlp(
             input_size=num_unique_states,
             hidden_sizes=trunk_combiner_head_sizes,
             output_size=1,
         )
-        logger.info(f"trunk: {self.trunk}")
+        logger.info(f"trunk_combiner_head: {self.trunk_combiner_head}")
 
     def forward(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass for the MiMo network.

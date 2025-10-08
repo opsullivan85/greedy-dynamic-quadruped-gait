@@ -6,6 +6,16 @@ logger = get_logger()
 
 
 @dataclass(frozen=True)
+class _Robot:
+    num_legs: int = 4
+    """Number of legs on the robot"""
+
+
+robot = _Robot()
+"""Robot constants"""
+
+
+@dataclass(frozen=True)
 class _ContactNet:
     grid_resolution: float = 0.075
     """Grid resolution used in contact-net training data generation"""
@@ -37,7 +47,7 @@ class _FootstepScanner:
     def __post_init__(self):
         self.grid_size.setflags(write=False)
         object.__setattr__(
-            self, "total_robot_features", 4 * self.grid_size[0] * self.grid_size[1]
+            self, "total_robot_features", robot.num_legs * self.grid_size[0] * self.grid_size[1]
         )
 
 
@@ -47,11 +57,11 @@ footstep_scanner = _FootstepScanner()
 
 @dataclass(frozen=True)
 class _GaitNet:
-    num_footstep_options: int = 4
+    num_footstep_options: int = 8
     """Number of footstep options to provide per leg"""
     cspace_dialation: int = 2
     """Number of times to apply max-pooling to the height scan to simulate c-space dialation"""
-    upscale_costmap_noise: float = 0.15
+    upscale_costmap_noise: float = 0.25
     """Amount of noise (+/-) to add to the costmap during upscale"""
     valid_height_range: tuple[float, float] = (-0.5, 0)
     """(min, max) valid height range for footstep options.
@@ -62,16 +72,6 @@ class _GaitNet:
 
 gait_net = _GaitNet()
 """GaitNet constants"""
-
-
-@dataclass(frozen=True)
-class _Robot:
-    num_legs: int = 4
-    """Number of legs on the robot"""
-
-
-robot = _Robot()
-"""Robot constants"""
 
 
 ##### Checks

@@ -139,8 +139,8 @@ def main():
             "max_grad_norm": 1.0,
             "use_clipped_value_loss": True,
             # decay rate of future rewards. Closer to 1 = long horizon, closer to 0 = short horizon
-            # H=1/(1-gamma); 0.98 corresponds to 2s
-            "gamma": 0.98,
+            # H=1/(1-gamma); 0.98 corresponds to 2s, 0.99 to 5s
+            "gamma": 0.99,
             "lam": 0.95,
         },
         "policy": {

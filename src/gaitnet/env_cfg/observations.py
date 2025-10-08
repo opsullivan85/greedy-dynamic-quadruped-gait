@@ -90,7 +90,7 @@ def contact_state_controller(env: ManagerBasedEnv) -> torch.Tensor:
         logger.warning(
             "Controllers are not initialized, returning fake data. Normal 1 time only."
         )
-        return torch.zeros((env.num_envs, 4), device=env.device, dtype=torch.bool)
+        return torch.zeros((env.num_envs, const.robot.num_legs), device=env.device, dtype=torch.bool)
 
     contacts: np.ndarray = controllers.call(
         Sim2RealInterface.get_contact_state, mask=None
@@ -222,13 +222,13 @@ def get_terrain_mask(
     1 indicates valid terrain
     """
     terrain_terms = (
-        const.footstep_scanner.grid_size[0] * const.footstep_scanner.grid_size[1] * 4
+        const.footstep_scanner.grid_size[0] * const.footstep_scanner.grid_size[1] * const.robot.num_legs
     )
     terrain_obs = obs[:, -terrain_terms:]
     # reshape to (N, 4, H, W)
     terrain_obs = terrain_obs.reshape(
         terrain_obs.shape[0],
-        4,
+        const.robot.num_legs,
         const.footstep_scanner.grid_size[0],
         const.footstep_scanner.grid_size[1],
     )

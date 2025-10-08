@@ -90,7 +90,7 @@ VoidTerrainImporterCfg: Callable[[], TerrainImporterCfg] = lambda: TerrainImport
     terrain_type="generator",
     # https://isaac-sim.github.io/IsaacLab/v2.1.0/source/api/lab/isaaclab.terrains.html#isaaclab.terrains.TerrainGeneratorCfg
     terrain_generator=TerrainGeneratorCfg(
-        size=(5, 5),
+        size=(4, 4),
         horizontal_scale=0.025,
         slope_threshold=0,
         sub_terrains={
@@ -100,8 +100,8 @@ VoidTerrainImporterCfg: Callable[[], TerrainImporterCfg] = lambda: TerrainImport
             ),
         },
         curriculum=True,
-        num_rows=5,
-        num_cols=5,
+        num_rows=6,
+        num_cols=6,
         difficulty_range=(0.0, 0.5),
     ),
     physics_material=sim_utils.RigidBodyMaterialCfg(
