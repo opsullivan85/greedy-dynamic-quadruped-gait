@@ -20,5 +20,15 @@ class CurriculumCfg:
             "num_steps": 10000,
         },
     )
+    # once the model has learned to move a foot, we add a small penalty on joint torques
+    # to encourage energy efficiency
+    add_joint_torque_penalty = CurrTerm(
+        func=mdp.modify_reward_weight,  # type: ignore
+        params={
+            "term_name": "joint_torques",
+            "weight": -1e-4,
+            "num_steps": 10000,
+        },
+    )
 
     terrain_levels = CurrTerm(func=vmdp.terrain_levels_vel)

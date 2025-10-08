@@ -66,6 +66,7 @@ class RewardsCfg:
 
     # penalties
     terminating = RewTerm(func=mdp.is_terminated, weight=-200.0)
+    joint_torques = RewTerm(func=mdp.joint_torques_l2, weight=0)  # set with curriculum
     lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.5)
     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.1)
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-8.0)

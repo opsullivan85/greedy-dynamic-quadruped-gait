@@ -30,31 +30,6 @@ contact_net = _ContactNet()
 """ContactNet constants"""
 
 
-_footstep_scanner_scale: int = 5
-
-
-@dataclass(frozen=True)
-class _FootstepScanner:
-    grid_resolution: float = contact_net.grid_resolution / _footstep_scanner_scale
-    """Grid resolution used in footstep scanner observations"""
-    total_robot_features: int = None  # type: ignore set in __post_init__
-    """Number of features in footstep scanner observations. Assumes one scanner per leg."""
-    grid_size: np.ndarray = field(
-        default_factory=lambda: contact_net.grid_size * _footstep_scanner_scale
-    )
-    """Grid size used in footstep scanner observations"""
-
-    def __post_init__(self):
-        self.grid_size.setflags(write=False)
-        object.__setattr__(
-            self, "total_robot_features", robot.num_legs * self.grid_size[0] * self.grid_size[1]
-        )
-
-
-footstep_scanner = _FootstepScanner()
-"""Footstep scanner constants"""
-
-
 @dataclass(frozen=True)
 class _GaitNet:
     num_footstep_options: int = 8
@@ -76,6 +51,44 @@ class _GaitNet:
 
 gait_net = _GaitNet()
 """GaitNet constants"""
+
+
+_footstep_scanner_scale: int = 5
+
+
+@dataclass(frozen=True)
+class _FootstepScanner:
+    grid_resolution: float = contact_net.grid_resolution / _footstep_scanner_scale
+    """Grid resolution used in footstep scanner observations"""
+    total_robot_features: int = None  # type: ignore set in __post_init__
+    """Number of features in footstep scanner observations. Assumes one scanner per leg."""
+    grid_size: np.ndarray = field(
+        default_factory=lambda: (
+            contact_net.grid_size * _footstep_scanner_scale
+        )
+    )
+    """Grid size used in footstep scanner observations"""
+    sensor_grid_size: np.ndarray = None  # type: ignore set in __post_init__
+    """Grid size of the underlying raycaster sensors used for footstep scanner observations.
+    This is larger than `grid_size` to account for c-space dialation."""
+
+    def __post_init__(self):
+        object.__setattr__(
+            self,
+            "total_robot_features",
+            robot.num_legs * self.grid_size[0] * self.grid_size[1],
+        )
+        object.__setattr__(
+            self,
+            "sensor_grid_size",
+            self.grid_size + 2 * gait_net.cspace_dialation,  # account for c-space dialation
+        )
+        self.grid_size.setflags(write=False)
+        self.sensor_grid_size.setflags(write=False)
+
+
+footstep_scanner = _FootstepScanner()
+"""Footstep scanner constants"""
 
 
 ##### Checks

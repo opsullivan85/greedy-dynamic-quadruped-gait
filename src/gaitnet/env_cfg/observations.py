@@ -109,21 +109,29 @@ def cspace_height_scan(
 ) -> torch.Tensor:
     """Height scan from the given sensor w.r.t. the sensor's frame.
 
+    Note that the input shape (const.footstep_scanner.sensor_grid_size) is larger than the output shape
+    (const.footstep_scanner.grid_size) to account for c-space dialation.
+
     assumes all sensor_cfgs point to RayCaster sensors with the same grid size
 
     The provided offset (Defaults to 0.5) is subtracted from the returned values.
     """
     height_scan = mdp.height_scan(env=env, sensor_cfg=sensor_cfg, offset=offset)
     # reshape to (N, H, W)
-    height_scan = height_scan.reshape((-1, *const.footstep_scanner.grid_size))
+    height_scan = height_scan.reshape((-1, *const.footstep_scanner.sensor_grid_size))
 
     # apply cspace dialation
     kernel_size = const.gait_net.cspace_dialation * 2 + 1
     # TODO: maybe we consider expanding our sensor size by padding
     # so we aren't getting misleading values at the edges?
-    padding = const.gait_net.cspace_dialation
+    padding = 0
     height_scan = F.max_pool2d(
         height_scan, kernel_size=kernel_size, stride=1, padding=padding
+    )
+
+    assert height_scan.shape[1:] == tuple(const.footstep_scanner.grid_size), (
+        f"Expected height scan shape to be {const.footstep_scanner.grid_size}, "
+        f"but got {height_scan.shape[1:]}"
     )
 
     # flatten to (N, H*W)

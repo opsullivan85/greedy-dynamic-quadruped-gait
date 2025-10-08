@@ -29,8 +29,8 @@ _height_scanner_settings = {
         "pattern_cfg": patterns.GridPatternCfg(
             resolution=const.footstep_scanner.grid_resolution,
             size=(
-                (const.footstep_scanner.grid_size[0] - 1) * const.footstep_scanner.grid_resolution,
-                (const.footstep_scanner.grid_size[1] - 1) * const.footstep_scanner.grid_resolution,
+                (const.footstep_scanner.sensor_grid_size[0] - 1) * const.footstep_scanner.grid_resolution,
+                (const.footstep_scanner.sensor_grid_size[1] - 1) * const.footstep_scanner.grid_resolution,
             ),
             # importantly, this is the ordering that 
             # contact-net expects (was used in training data generation)

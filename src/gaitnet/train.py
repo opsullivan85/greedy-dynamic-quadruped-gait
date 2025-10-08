@@ -145,7 +145,7 @@ def main():
             "critic": gaitnet_critic,
         },
         "log_dir": log_dir,
-        "num_steps_per_env": 500,  # ~2 episodes per batch (episode = 10s = 250 iterations)
+        "num_steps_per_env": 500,  # ~1 episodes per batch (episode = 20s = 500 iterations)
         "save_interval": 5,
         "empirical_normalization": False,
         "logger": "tensorboard",  # Explicitly set TensorBoard as logger

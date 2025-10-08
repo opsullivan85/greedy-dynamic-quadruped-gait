@@ -157,6 +157,34 @@ class GaitnetActor(nn.Module):
         duration = torch.sigmoid(duration) * scale + min_dur
 
         return logits, duration
+    
+    @staticmethod
+    def act_inference(actor: "GaitnetActor", observations: torch.Tensor) -> torch.Tensor:
+        """Deterministic action selection for inference.
+        
+        Args:
+            observations: Observations (num_envs, obs_dim)
+            
+        Returns:
+            actions: Deterministic actions (num_envs, 2) where:
+                     - Column 0: discrete action index (0-16)
+                     - Column 1: mean duration value
+        """
+        # Get logits and durations from actor
+        logits, duration_means = actor(observations)
+        
+        # Select action with highest logit (deterministic)
+        action_index = torch.argmax(logits, dim=-1)  # (num_envs,)
+        
+        # Use mean durations for the selected action (deterministic)
+        batch_size = action_index.shape[0]
+        batch_indices = torch.arange(batch_size, device=action_index.device)
+        selected_durations = duration_means[batch_indices, action_index]  # (num_envs,)
+        
+        # Combine action index and duration into a single tensor
+        actions = torch.stack([action_index.float(), selected_durations], dim=-1)  # (num_envs, 2)
+        
+        return actions
 
 
 class GaitnetCritic(nn.Module):
@@ -491,21 +519,7 @@ class GaitnetActorCritic(ActorCritic):
                      - Column 0: discrete action index (0-16)
                      - Column 1: mean duration value
         """
-        # Get logits and durations from actor
-        logits, duration_means = self.actor(observations)
-        
-        # Select action with highest logit (deterministic)
-        action_index = torch.argmax(logits, dim=-1)  # (num_envs,)
-        
-        # Use mean durations for the selected action (deterministic)
-        batch_size = action_index.shape[0]
-        batch_indices = torch.arange(batch_size, device=action_index.device)
-        selected_durations = duration_means[batch_indices, action_index]  # (num_envs,)
-        
-        # Combine action index and duration into a single tensor
-        actions = torch.stack([action_index.float(), selected_durations], dim=-1)  # (num_envs, 2)
-        
-        return actions
+        return GaitnetActor.act_inference(self.actor, observations)
     
     def evaluate(self, critic_observations, **kwargs):
         """Evaluate the value function.
