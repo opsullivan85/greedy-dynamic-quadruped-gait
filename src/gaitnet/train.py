@@ -79,23 +79,19 @@ def main():
         device=args_cli.device,
         manager_class=FootstepOptionEnv,
     )
-
-    shared_size = 22
-    unique_size = 8  # leg one-hot (5), dx, dy, cost
-
     gaitnet_actor = gaitnet.GaitnetActor(
-        shared_state_dim=shared_size,
+        shared_state_dim=const.gait_net.robot_state_dim,
         shared_layer_sizes=[128, 128, 128],
-        unique_state_dim=unique_size,
+        unique_state_dim=const.gait_net.footstep_option_dim,
         unique_layer_sizes=[64, 64],
         trunk_layer_sizes=[128, 128, 128],
     ).to(args_cli.device)
 
     gaitnet_critic = gaitnet.GaitnetCritic(
-        shared_state_dim=shared_size,
+        shared_state_dim=const.gait_net.robot_state_dim,
         shared_layer_sizes=[128, 128, 128],
         num_unique_states=const.gait_net.num_footstep_options*const.robot.num_legs+1,  # +1 for the "no step" option
-        unique_state_dim=unique_size,
+        unique_state_dim=const.gait_net.footstep_option_dim,
         unique_layer_sizes=[64, 64],
         trunk_layer_sizes=[128, 128, 128],
         trunk_combiner_head_sizes=[64, 64],

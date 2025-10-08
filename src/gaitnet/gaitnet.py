@@ -50,10 +50,6 @@ class GaitnetActor(nn.Module):
         trunk_layer_sizes: Sequence[int],
     ):
         super().__init__()
-
-        self.shared_state_size = 22
-        self.unique_state_size = 8  # leg one-hot (5), dx, dy, cost
-
         logger.info("GaitnetActor initializing")
 
         self.shared_encoder = make_mlp(
@@ -108,16 +104,16 @@ class GaitnetActor(nn.Module):
                 - durations: Duration predictions for each option (num_envs, num_options)
         """
         num_envs = obs.shape[0]
-        shared_state = obs[:, : self.shared_state_size]
+        shared_state = obs[:, : const.gait_net.robot_state_dim]
 
-        remaining_obs_size = obs.shape[1] - self.shared_state_size
-        unique_states_dim = remaining_obs_size / self.unique_state_size
+        remaining_obs_size = obs.shape[1] - const.gait_net.robot_state_dim
+        unique_states_dim = remaining_obs_size / const.gait_net.footstep_option_dim
         assert (
             unique_states_dim.is_integer()
-        ), f"Expected unique_state_size ({self.unique_state_size}) to evenly divide the remaining observation size ({remaining_obs_size}), got {unique_states_dim}"
+        ), f"Expected unique_state_size ({const.gait_net.footstep_option_dim}) to evenly divide the remaining observation size ({remaining_obs_size}), got {unique_states_dim}"
         unique_states_dim = int(unique_states_dim)
-        unique_states = obs[:, self.shared_state_size :].view(
-            num_envs, unique_states_dim, self.unique_state_size
+        unique_states = obs[:, const.gait_net.robot_state_dim :].view(
+            num_envs, unique_states_dim, const.gait_net.footstep_option_dim
         )
         unique_states_iter = torch.split(unique_states, 1, dim=1)
 
@@ -175,10 +171,6 @@ class GaitnetCritic(nn.Module):
         trunk_combiner_head_sizes: Sequence[int] = [32, 32],
     ):
         super().__init__()
-
-        self.shared_state_size = 22
-        self.unique_state_size = 8  # leg one-hot (5), dx, dy, cost
-
         logger.info("GaitnetCritic initializing")
 
         self.shared_encoder = make_mlp(
@@ -225,16 +217,16 @@ class GaitnetCritic(nn.Module):
             tuple[torch.Tensor, torch.Tensor]: Value and duration predictions.
         """
         num_envs = obs.shape[0]
-        shared_state = obs[:, : self.shared_state_size]
+        shared_state = obs[:, : const.gait_net.robot_state_dim]
 
-        remaining_obs_size = obs.shape[1] - self.shared_state_size
-        unique_states_dim = remaining_obs_size / self.unique_state_size
+        remaining_obs_size = obs.shape[1] - const.gait_net.robot_state_dim
+        unique_states_dim = remaining_obs_size / const.gait_net.footstep_option_dim
         assert (
             unique_states_dim.is_integer()
-        ), f"Expected unique_state_size ({self.unique_state_size}) to evenly divide the remaining observation size ({remaining_obs_size}), got {unique_states_dim}"
+        ), f"Expected unique_state_size ({const.gait_net.footstep_option_dim}) to evenly divide the remaining observation size ({remaining_obs_size}), got {unique_states_dim}"
         unique_states_dim = int(unique_states_dim)
-        unique_states = obs[:, self.shared_state_size :].view(
-            num_envs, unique_states_dim, self.unique_state_size
+        unique_states = obs[:, const.gait_net.robot_state_dim :].view(
+            num_envs, unique_states_dim, const.gait_net.footstep_option_dim
         )
         unique_states_iter = torch.split(unique_states, 1, dim=1)
 
@@ -399,12 +391,10 @@ class GaitnetActorCritic(ActorCritic):
         self._cached_duration_means = duration_means
         
         # remove all but the last no-op so it doesn't affect probabilities
-        obs_start = 22  # shared_state_size
-        unique_state_size = 8
         num_options = logits.shape[1]
         # Reshape to get per-option state
-        action_candidates = observations[:, obs_start:].view(
-            observations.shape[0], num_options, unique_state_size
+        action_candidates = observations[:, const.gait_net.robot_state_dim :].view(
+            observations.shape[0], num_options, const.gait_net.footstep_option_dim
         )
         # Mask: True for valid actions, False for no-ops or high cost
         no_op_mask = action_candidates[:, :, 0] == 1

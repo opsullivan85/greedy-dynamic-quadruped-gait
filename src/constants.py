@@ -68,6 +68,10 @@ class _GaitNet:
     Note that these are negative of the values you would expect."""
     valid_swing_duration_range: tuple[float, float] = (0.2, 0.3)
     """(min, max) valid swing duration range for footstep options."""
+    robot_state_dim: int = 25
+    """Dimension of the robot state input to GaitNet (shared state)"""
+    footstep_option_dim: int = 8
+    """Dimension of the footstep option input to GaitNet (unique state)"""
 
 
 gait_net = _GaitNet()

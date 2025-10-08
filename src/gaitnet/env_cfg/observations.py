@@ -134,6 +134,9 @@ def cspace_height_scan(
     return height_scan
 
 
+contact_state_indices = np.asarray([18, 19, 20, 21])
+
+
 @configclass
 class ObservationsCfg:
     """Observation specifications for the MDP."""
@@ -180,6 +183,10 @@ class ObservationsCfg:
         contact_state_controller = ObsTerm(
             func=contact_state_controller,
             params={},
+        )
+
+        projected_gravity = ObsTerm(
+            func=mdp.projected_gravity,
         )
 
         FR_foot_scanner = ObsTerm(

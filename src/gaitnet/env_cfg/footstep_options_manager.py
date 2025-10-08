@@ -16,6 +16,7 @@ from src.simulation.cfg.footstep_scanner_constants import idx_to_xy
 from src.util.math import seeded_uniform_noise
 from src.contactnet.debug import view_footstep_cost_map
 from src import get_logger
+from src.gaitnet.env_cfg.observations import contact_state_indices
 
 logger = get_logger()
 
@@ -51,9 +52,7 @@ class FootstepOptionGenerator:
             terrain_mask, cost_map, torch.tensor(float("inf"), device=cost_map.device)
         )
 
-        # remove options for legs in swing state
-        # here 18:22 are the contact states for the 4 legs
-        contact_states = obs[:, 18:22].bool()  # (num_envs, 4)
+        contact_states = obs[:, contact_state_indices].bool()  # (num_envs, 4)
         swing_states = ~contact_states  # (num_envs, 4)
         masked_cost_maps = torch.where(
             swing_states.unsqueeze(-1).unsqueeze(-1),
