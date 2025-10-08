@@ -46,7 +46,7 @@ class RewardsCfg:
 
     # rewards
     alive = RewTerm(func=mdp.is_alive, weight=0.4   )
-    a_foot_in_swing = RewTerm(func=a_foot_in_swing, weight=0.1)
+    a_foot_in_swing = RewTerm(func=a_foot_in_swing, weight=0.0)
     xy_tracking = RewTerm(
         func=mdp.track_lin_vel_xy_exp,
         weight=0.5,
@@ -66,7 +66,7 @@ class RewardsCfg:
 
     # penalties
     terminating = RewTerm(func=mdp.is_terminated, weight=-200.0)
-    joint_torques = RewTerm(func=mdp.joint_torques_l2, weight=0)  # set with curriculum
+    joint_accelerations = RewTerm(func=mdp.joint_acc_l2, weight=0)  # set with curriculum
     lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.5)
     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.1)
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-8.0)

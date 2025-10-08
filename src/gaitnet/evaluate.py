@@ -76,7 +76,7 @@ def load_model(checkpoint_path: Path, device: torch.device) -> gaitnet.GaitnetAc
     return model
 
 def main():
-    # args_cli.device = "cpu"
+    args_cli.device = "cpu"
     args_cli.num_envs = 1
     device = torch.device(args_cli.device)
     model = load_model(get_checkpoint_path(), device)
