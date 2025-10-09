@@ -79,6 +79,9 @@ def main():
         device=args_cli.device,
         manager_class=FootstepOptionEnv,
     )
+    episode_info = {}
+    env.episode_info = episode_info
+
     gaitnet_actor = gaitnet.GaitnetActor(
         shared_state_dim=const.gait_net.robot_state_dim,
         shared_layer_sizes=[128, 128, 128],
@@ -143,6 +146,7 @@ def main():
             "class_name": actor_critic_class.__name__,
             "actor": gaitnet_actor,
             "critic": gaitnet_critic,
+            "episode_info": episode_info,
         },
         "log_dir": log_dir,
         "num_steps_per_env": 500,  # ~1 episodes per batch (episode = 20s = 500 iterations)

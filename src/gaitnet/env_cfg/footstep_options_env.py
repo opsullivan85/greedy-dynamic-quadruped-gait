@@ -1,4 +1,6 @@
-from isaaclab.envs import ManagerBasedRLEnv
+from typing import Any
+import torch
+from isaaclab.envs import ManagerBasedRLEnv, VecEnvStepReturn
 from isaaclab.managers import (
     ActionManager,
     CommandManager,
@@ -7,6 +9,7 @@ from isaaclab.managers import (
     RewardManager,
     TerminationManager,
 )
+import copy
 
 from src import get_logger
 from src.gaitnet.actions.mpc_action import ManagerBasedEnv
@@ -16,6 +19,10 @@ logger = get_logger()
 
 
 class FootstepOptionEnv(ManagerBasedRLEnv):
+    def __init__(self, episode_info: dict[str, Any]|None=None, *args, **kwargs):
+        self.episode_info = episode_info
+        super().__init__(*args, **kwargs)
+
     def load_managers(self):
         # note: this order is important since observation manager needs to know the command and action managers
         # and the reward manager needs to know the termination manager
@@ -65,3 +72,9 @@ class FootstepOptionEnv(ManagerBasedRLEnv):
         # perform events at the start of the simulation
         if "startup" in self.event_manager.available_modes:
             self.event_manager.apply(mode="startup")
+    
+    def step(self, action: torch.Tensor) -> VecEnvStepReturn:
+        if self.episode_info is not None:
+            self.extras["episode"] = copy.copy(self.episode_info)
+            self.episode_info = {}
+        return super().step(action)

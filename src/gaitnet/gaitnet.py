@@ -1,3 +1,4 @@
+from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -308,10 +309,25 @@ class GaitnetActorCritic(ActorCritic):
         num_actions,
         actor: GaitnetActor,
         critic: GaitnetCritic,
+        episode_info: dict[str, Any]|None = None,
         init_noise_std=1.0,
         noise_std_type: str = "scalar",
         duration_std: float = 0.01,  # Standard deviation for duration noise
     ):
+        """
+
+        Args:
+            num_actor_obs (_type_): _description_
+            num_critic_obs (_type_): _description_
+            num_actions (_type_): _description_
+            actor (GaitnetActor): _description_
+            critic (GaitnetCritic): _description_
+            episode_info (dict[str, Any] | None, optional): Shared dictionary to dump episode data into
+            init_noise_std (float, optional): _description_. Defaults to 1.0.
+            noise_std_type (str, optional): _description_. Defaults to "scalar".
+            duration_std (float, optional): _description_. Defaults to 0.01.
+        """
+        self.episode_info = episode_info
         nn.Module.__init__(self)
         logger.info("GaitnetActorCritic initializing")
         logger.info(
@@ -404,6 +420,27 @@ class GaitnetActorCritic(ActorCritic):
         
         return discrete_entropy + duration_entropy
     
+    def _log_episode_info(self, logits: torch.Tensor, duration_means: torch.Tensor):
+        if self.episode_info is None:
+            return
+        
+        no_op_mask = duration_means == 0
+        op_mask = ~no_op_mask
+        if not torch.any(op_mask):
+            self.episode_info["leg_option_std"] = 0
+            self.episode_info["duration_mean"] = 0
+            self.episode_info["duration_std"] = 0
+            return
+
+        leg_logits = logits[:, :-1].view(logits.shape[0], 4, -1)  # (num_envs, 4, num_options)
+        leg_op_mask = torch.sum(no_op_mask[:, :-1].view(no_op_mask.shape[0], 4, -1).long(), dim=-1)==0
+        per_leg_std = torch.std(leg_logits, dim=2)[leg_op_mask]  # (num_ops,)
+        option_std = torch.mean(per_leg_std) # (1,)
+        self.episode_info["leg_option_std"] = option_std.item()
+
+        self.episode_info["duration_mean"] = torch.mean(duration_means[op_mask]).item()
+        self.episode_info["duration_std"] = torch.std(duration_means[op_mask]).item()
+    
     def update_distribution(self, observations):
         """Update the action distribution based on observations.
         
@@ -418,6 +455,8 @@ class GaitnetActorCritic(ActorCritic):
         logits, duration_means = self.actor(observations)  # Access underlying actor
         # logits: (num_envs, num_options)
         # duration_means: (num_envs, num_options)
+
+        self._log_episode_info(logits, duration_means)
         
         # Cache duration means for later use
         self._cached_duration_means = duration_means
