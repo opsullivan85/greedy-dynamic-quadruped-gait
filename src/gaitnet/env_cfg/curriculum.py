@@ -32,14 +32,14 @@ class CurriculumCfg:
     #     },
     # )
 
-    # once the robot learns to walk, reward it for moving it's feet less
-    add_no_op_reward = CurrTerm(
-        func=mdp.modify_reward_weight,  # type: ignore
-        params={
-            "term_name": "no_op",
-            "weight": 0.1,
-            "num_steps": 15000,
-        },
-    )
+    # # once the robot learns to walk, reward it for moving it's feet less
+    # add_no_op_reward = CurrTerm(
+    #     func=mdp.modify_reward_weight,  # type: ignore
+    #     params={
+    #         "term_name": "no_op",
+    #         "weight": 0.1,
+    #         "num_steps": 15000,
+    #     },
+    # )
 
     terrain_levels = CurrTerm(func=vmdp.terrain_levels_vel)

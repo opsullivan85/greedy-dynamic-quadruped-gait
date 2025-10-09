@@ -52,6 +52,17 @@ def no_op_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
     return reward
 
 
+def op_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """op reward function. Rewards the agent for not choosing the no-op action."""
+    actions: torch.Tensor = env.action_manager.action
+    action_indices = actions[:, 0]
+    # dont need to add one here because of zero indexing
+    # the no_op is always the last index
+    no_op_index = const.robot.num_legs * const.gait_net.num_footstep_options
+    reward = (action_indices != no_op_index).float()
+    return reward
+
+
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
@@ -78,6 +89,7 @@ class RewardsCfg:
     )
 
     # penalties
+    op_penalty = RewTerm(func=op_reward, weight=0.7)  # set with curriculum
     terminating = RewTerm(func=mdp.is_terminated, weight=-200.0)
     joint_accelerations = RewTerm(func=mdp.joint_acc_l2, weight=0)  # set with curriculum
     lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.5)
