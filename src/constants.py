@@ -32,11 +32,11 @@ contact_net = _ContactNet()
 
 @dataclass(frozen=True)
 class _GaitNet:
-    num_footstep_options: int = 8
+    num_footstep_options: int = 16
     """Number of footstep options to provide per leg"""
     cspace_dialation: int = 2
     """Number of times to apply max-pooling to the height scan to simulate c-space dialation"""
-    upscale_costmap_noise: float = 0.25
+    upscale_costmap_noise: float = 0.35
     """Amount of noise (+/-) to add to the costmap during upscale"""
     valid_height_range: tuple[float, float] = (-0.5, 0)
     """(min, max) valid height range for footstep options.
