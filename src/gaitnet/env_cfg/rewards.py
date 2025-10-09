@@ -6,6 +6,7 @@ import isaaclab_tasks.manager_based.locomotion.velocity.config.spot.mdp as spot_
 from isaaclab.managers import RewardTermCfg as RewTerm, SceneEntityCfg
 from isaaclab.utils import configclass
 from src.sim2real import Sim2RealInterface
+import src.constants as const
 
 
 def a_foot_in_swing(env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -40,6 +41,17 @@ def height_below_minimum(
     return bodies_below
 
 
+def no_op_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """No-op reward function. Rewards the agent for choosing the no-op action."""
+    actions: torch.Tensor = env.action_manager.action
+    action_indices = actions[:, 0]
+    # dont need to add one here because of zero indexing
+    # the no_op is always the last index
+    no_op_index = const.robot.num_legs * const.gait_net.num_footstep_options
+    reward = (action_indices == no_op_index).float()
+    return reward
+
+
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
@@ -47,6 +59,7 @@ class RewardsCfg:
     # rewards
     alive = RewTerm(func=mdp.is_alive, weight=0.4   )
     a_foot_in_swing = RewTerm(func=a_foot_in_swing, weight=0.0)
+    no_op = RewTerm(func=no_op_reward, weight=0.0)  # set with curriculum
     xy_tracking = RewTerm(
         func=mdp.track_lin_vel_xy_exp,
         weight=0.5,

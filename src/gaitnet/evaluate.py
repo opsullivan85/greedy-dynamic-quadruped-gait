@@ -1,4 +1,3 @@
-
 from typing import Any
 from tensorflow.python import checkpoint
 import torch
@@ -51,7 +50,7 @@ from rsl_rl.runners import on_policy_runner
 import rsl_rl.modules
 from src.gaitnet.env_cfg.gaitnet_env import get_env
 from src.util import log_exceptions
-from src.gaitnet import gaitnet
+from src.gaitnet import actions, gaitnet
 import re
 from pathlib import Path
 import src.constants as const
@@ -60,7 +59,8 @@ from src import get_logger
 
 logger = get_logger()
 
-def load_model(checkpoint_path: Path, device: torch.device) -> gaitnet.GaitnetActor:
+
+def load_model(checkpoint_path: Path, device: torch.device) -> gaitnet.GaitnetActorCritic:
     model = gaitnet.GaitnetActor(
         shared_state_dim=const.gait_net.robot_state_dim,
         shared_layer_sizes=[128, 128, 128],
@@ -68,12 +68,16 @@ def load_model(checkpoint_path: Path, device: torch.device) -> gaitnet.GaitnetAc
         unique_layer_sizes=[64, 64],
         trunk_layer_sizes=[128, 128, 128],
     )
+    agent = gaitnet.GaitnetActorCritic(0, 0, 0, model, None)  # type: ignore
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint["model_state_dict"]
-    new_state_dict = {re.sub(r"^actor\.", "", k): v for k, v in state_dict.items() if k.startswith("actor.")}
-    model.load_state_dict(new_state_dict)
-    model.to(device)
-    return model
+    # state_dict = {re.sub(r"^actor\.", "", k): v for k, v in state_dict.items() if k.startswith("actor.")}
+    # remove all critic keys
+    state_dict = {k: v for k, v in state_dict.items() if k.startswith("actor.")}
+    agent.load_state_dict(state_dict)
+    agent.to(device)
+    return agent
+
 
 def main():
     args_cli.device = "cpu"
@@ -92,8 +96,12 @@ def main():
 
     with torch.inference_mode():
         while True:
-            with Timer(logger, "model inference"):
-                actions = gaitnet.GaitnetActor.act_inference(model, obs)
+            # with Timer(logger, "model inference"):
+                # actions = gaitnet.GaitnetActor.act_inference(model, obs)
+            actions = model.act(obs)
+            action = actions[0]
+            if action[0] != 32:
+                print(action[-1])
             obs_, rew, terminated, truncated, info = env.step(actions)
             # coerce type system
             obs = obs_["policy"]  # type: ignore

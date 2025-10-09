@@ -149,12 +149,16 @@ class GaitnetActor(nn.Module):
         trunk_output = self.trunk(trunk_input)
 
         logits = self.value_head(trunk_output).squeeze(-1)  # (num_envs, num_options)
-        duration = self.duration_head(trunk_output).squeeze(-1)  # (num_envs, num_options)
-        
+
+        # only calculate durations for non no-op options
+        duration = torch.zeros((num_envs, unique_states_dim), device=obs.device)
+        no_op_mask = unique_states[:, :, 0] == 1
+        duration[~no_op_mask] = self.duration_head(trunk_output[~no_op_mask]).squeeze(-1)  # (num_envs, num_options)
+
         # Scale durations to reasonable range
         min_dur, max_dur = const.gait_net.valid_swing_duration_range
         scale = max_dur - min_dur
-        duration = torch.sigmoid(duration) * scale + min_dur
+        duration[~no_op_mask] = torch.sigmoid(duration[~no_op_mask]) * scale + min_dur
 
         return logits, duration
     
