@@ -469,24 +469,25 @@ class GaitnetActorCritic(ActorCritic):
                     )
                     == 0
                 )
-                per_leg_std = torch.std(leg_logits, dim=2)[leg_op_mask]  # (num_ops,)
+                # Use unbiased=False for faster std computation
+                per_leg_std = torch.std(leg_logits, dim=2, unbiased=False)[leg_op_mask]  # (num_ops,)
                 option_std = torch.mean(per_leg_std)  # (1,)
                 self.episode_info["leg_option_std"] = option_std.item()
 
+                # Faster correlation approximation using dot product
                 costs = observations[:, const.gait_net.robot_state_dim :].view(
                     logits.shape[0], -1, const.gait_net.footstep_option_dim
                 )[:, :, -1]  # (num_envs, num_options, footstep_option_dim)
-                # calculate correlation between logits and costs
-                # here we negate cost so a negative correlation is good
-                correlation = torch.corrcoef(
-                    torch.stack(
-                        [
-                            logits[op_mask].flatten(),  # (num_ops,)
-                            -costs[op_mask].flatten(),  # (num_ops * num_legs,)
-                        ], dim=0
-                    )
-                )
-                self.episode_info["logit_cost_correlation"] = correlation[0, 1].item()
+                # Use simple normalized dot product instead of full corrcoef
+                logits_flat = logits[op_mask].flatten()
+                costs_flat = -costs[op_mask].flatten()
+                # Normalize
+                logits_norm = logits_flat - logits_flat.mean()
+                costs_norm = costs_flat - costs_flat.mean()
+                logits_norm = logits_norm / (logits_norm.std(unbiased=False) + 1e-8)
+                costs_norm = costs_norm / (costs_norm.std(unbiased=False) + 1e-8)
+                correlation = (logits_norm * costs_norm).mean()
+                self.episode_info["logit_cost_correlation"] = correlation.item()
 
             else:
                 self.episode_info["leg_option_std"] = 0
@@ -548,13 +549,14 @@ class GaitnetActorCritic(ActorCritic):
             no_op_index = const.gait_net.num_footstep_options * const.robot.num_legs
             op_mask = action_index != no_op_index
             if torch.any(op_mask):
+                # Use unbiased=False for faster computation
                 self.episode_info["duration_mean"] = torch.mean(
                     sampled_durations[op_mask]
                 ).item()
                 self.episode_info["duration_std"] = torch.std(
-                    sampled_durations[op_mask]
+                    sampled_durations[op_mask], unbiased=False
                 ).item()
-                self.episode_info["ops_per_step"] = torch.mean(op_mask.float())
+                self.episode_info["ops_per_step"] = torch.mean(op_mask.float()).item()
             else:
                 self.episode_info["duration_mean"] = 0
                 self.episode_info["duration_std"] = 0
