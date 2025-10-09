@@ -75,6 +75,7 @@ class FootstepOptionEnv(ManagerBasedRLEnv):
     
     def step(self, action: torch.Tensor) -> VecEnvStepReturn:
         if self.episode_info is not None:
-            self.extras["episode"] = copy.copy(self.episode_info)
-            self.episode_info = {}
+            for key, val in self.episode_info.items():
+                self.extras["log"][f"Custom_Metrics/{key}"] = val
+            self.episode_info.clear()
         return super().step(action)
