@@ -60,7 +60,7 @@ from src import get_logger
 logger = get_logger()
 
 
-def load_model(checkpoint_path: Path, device: torch.device) -> gaitnet.GaitnetActorCritic:
+def load_model(checkpoint_path: Path, device: torch.device, deterministic: bool) -> gaitnet.GaitnetActorCritic | gaitnet.GaitnetActor:
     model = gaitnet.GaitnetActor(
         shared_state_dim=const.gait_net.robot_state_dim,
         shared_layer_sizes=[128, 128, 128],
@@ -68,12 +68,16 @@ def load_model(checkpoint_path: Path, device: torch.device) -> gaitnet.GaitnetAc
         unique_layer_sizes=[64, 64],
         trunk_layer_sizes=[128, 128, 128],
     )
-    agent = gaitnet.GaitnetActorCritic(0, 0, 0, model, None)  # type: ignore
+    if deterministic:
+        agent = model
+    else:
+        agent = gaitnet.GaitnetActorCritic(0, 0, 0, model, None)  # type: ignore
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint["model_state_dict"]
-    # state_dict = {re.sub(r"^actor\.", "", k): v for k, v in state_dict.items() if k.startswith("actor.")}
-    # remove all critic keys
-    state_dict = {k: v for k, v in state_dict.items() if k.startswith("actor.")}
+    if deterministic:
+        state_dict = {re.sub(r"^actor\.", "", k): v for k, v in state_dict.items() if k.startswith("actor.")}
+    else:  # remove all critic keys
+        state_dict = {k: v for k, v in state_dict.items() if k.startswith("actor.")}
     agent.load_state_dict(state_dict)
     agent.to(device)
     return agent
@@ -81,9 +85,10 @@ def load_model(checkpoint_path: Path, device: torch.device) -> gaitnet.GaitnetAc
 
 def main():
     args_cli.device = "cpu"
+    deterministic = True
     args_cli.num_envs = 1
     device = torch.device(args_cli.device)
-    model = load_model(get_checkpoint_path(), device)
+    model = load_model(get_checkpoint_path(), device, deterministic=deterministic)
     model.eval()
 
     env = get_env(
@@ -96,9 +101,10 @@ def main():
 
     with torch.inference_mode():
         while True:
-            # with Timer(logger, "model inference"):
-                # actions = gaitnet.GaitnetActor.act_inference(model, obs)
-            actions = model.act(obs)
+            if deterministic:
+                actions = gaitnet.GaitnetActor.act_inference(model, obs)
+            if not deterministic:
+                actions = model.act(obs)
             action = actions[0]
             if action[0] != 32:
                 print(action[-1])

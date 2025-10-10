@@ -89,7 +89,7 @@ class RewardsCfg:
     )
 
     # penalties
-    op_penalty = RewTerm(func=op_reward, weight=-3)  # set with curriculum
+    op_penalty = RewTerm(func=op_reward, weight=-2.5)  # set with curriculum
     terminating = RewTerm(func=mdp.is_terminated, weight=-200.0)
     joint_accelerations = RewTerm(func=mdp.joint_acc_l2, weight=0)  # set with curriculum
     lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.5)
@@ -97,7 +97,7 @@ class RewardsCfg:
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-8.0)
     foot_slip = RewTerm(
         func=spot_mdp.foot_slip_penalty,
-        weight=-0.75,
+        weight=-6,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
