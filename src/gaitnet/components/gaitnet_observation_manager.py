@@ -14,8 +14,6 @@ from src import get_logger
 logger = get_logger()
 
 
-_debug_footstep_cost_map = False
-_debug_footstep_cost_map_all = False
 
 
 class GaitNetObservationManager(ObservationManager):
