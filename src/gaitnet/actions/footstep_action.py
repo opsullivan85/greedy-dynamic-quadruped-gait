@@ -12,11 +12,18 @@ from src import sim2real
 from src.util import VectorPool
 from src.simulation.util import controls_to_joint_efforts
 import numpy as np
+import src.constants as const
 from src import get_logger
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.gaitnet.env_cfg.footstep_options_manager import FootstepObservationManager
 
 logger = get_logger()
 
 NO_STEP = -1  # special value for no step
+
 
 class FSCActionTerm(ActionTerm):
     """Footstep Controller (FSC) Action Term"""
@@ -38,16 +45,25 @@ class FSCActionTerm(ActionTerm):
             (self.num_envs, self.action_dim), device=self.device
         )
         self._processed_actions = self._raw_actions
+    
+    def _get_option_manager(self) -> "FootstepObservationManager":
+        """Get the footstep option manager.
+
+        note that it isn't initilized until after the action term is initialized
+
+        Returns:
+            The footstep option manager.
+        """
+        footstep_option_manager: "FootstepObservationManager" = self._env.observation_manager  # type: ignore
+        return footstep_option_manager
 
     @property
     def action_dim(self) -> int:
         """Dimension of the action term.
         
-        [:, 0] = leg index (0-3) or no step (-1)
-        [:, 1:3] = x, y location relative to hip
-        [:, 3] = duration of the step in seconds
+        Returns 2: action index (0-16) and duration value.
         """
-        return 4
+        return 2  # Action index + duration
 
     @property
     def raw_actions(self) -> torch.Tensor:
@@ -56,7 +72,7 @@ class FSCActionTerm(ActionTerm):
     @property
     def processed_actions(self) -> torch.Tensor:
         return self._processed_actions
-    
+
     @staticmethod
     def footstep_kwargs(processed_actions: np.ndarray) -> dict[str, np.ndarray]:
         """Generate the kwargs for the footstep initiation call.
@@ -81,6 +97,41 @@ class FSCActionTerm(ActionTerm):
             "duration": processed_actions[:, 3],
         }
 
+    def action_indices_to_actions(self, actions: torch.Tensor) -> torch.Tensor:
+        """Convert actions (index + duration) to footstep actions.
+
+        Args:
+            actions: The actions from the policy. (num_envs, 2) where:
+                     - Column 0: action index (0-16)
+                     - Column 1: duration value
+
+        Returns:
+            Footstep actions.
+            (num_envs, 4) where each action is (leg, x, y, duration)
+        """
+        # Extract action indices and durations
+        action_indices = actions[:, 0].long()  # (num_envs,)
+        durations = actions[:, 1]  # (num_envs,)
+        
+        # Get the footstep options from the observation manager
+        footstep_option_manager: "FootstepObservationManager" = (
+            self._get_option_manager()
+        )
+        all_options = footstep_option_manager.footstep_options  # (num_envs, 17, 4) - last column is cost
+        
+        # Use proper indexing to select the options (leg, x, y, cost)
+        batch_size = action_indices.shape[0]
+        batch_indices = torch.arange(batch_size, device=self.device)
+        
+        # Gather the selected options (leg, x, y, cost)
+        selected_options = all_options[batch_indices, action_indices]  # (num_envs, 4)
+        
+        # Replace the cost (column 3) with the duration from the policy
+        selected_actions = selected_options.clone()
+        selected_actions[:, 3] = durations
+        
+        return selected_actions  # (num_envs, 4) - (leg, x, y, duration)
+
     def process_actions(self, actions: torch.Tensor):
         """Processes the actions sent to the environment.
 
@@ -88,18 +139,23 @@ class FSCActionTerm(ActionTerm):
             This function is called once per environment step by the manager.
 
         Args:
-            actions: The actions to process.
+            actions: The actions from the policy (num_envs, 2) where:
+                     - Column 0: action index (0-16)
+                     - Column 1: duration value
         """
-        # initiate the footstep if specified by the actions
+        # Store raw actions
         self._raw_actions = actions
-        self._processed_actions = self._raw_actions  # no processing needed
+        
+        # Convert actions (index + duration) to footstep actions (leg, x, y, duration)
+        self._processed_actions = self.action_indices_to_actions(actions)
         processed_actions_cpu = self.processed_actions.cpu().numpy()
 
+        # processed_actions is now (num_envs, 4) - single action per env
+        action = processed_actions_cpu  # (num_envs, 4)
+        
         # mask out invalid steps
-        mask = processed_actions_cpu[:, 0] != NO_STEP
-        footstep_parameters = self.footstep_kwargs(processed_actions_cpu)
-
-        # logger.info(f"actions: {actions[0].cpu().numpy().tolist()}")
+        mask = action[:, 0] != NO_STEP
+        footstep_parameters = self.footstep_kwargs(action)
 
         # initiate the footsteps
         robot_controllers: VectorPool[sim2real.Sim2RealInterface] = self.env_cfg.robot_controllers  # type: ignore
@@ -117,7 +173,7 @@ class FSCActionTerm(ActionTerm):
         """
         # we don't do anything here
         pass
-    
+
     def reset(self, env_ids: Sequence[int] | None = None):
         """Reset the action term.
 
@@ -125,6 +181,7 @@ class FSCActionTerm(ActionTerm):
             env_ids: The environment IDs to reset.
         """
         super().reset(env_ids)
+
 
 @configclass
 class FSCActionCfg(ActionTermCfg):

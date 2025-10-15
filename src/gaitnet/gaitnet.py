@@ -1,638 +1,638 @@
-from typing import Callable
-from rsl_rl.modules import ActorCritic
+from typing import Any
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from isaaclab.envs import ManagerBasedRLEnv
-from src.gaitnet.actions.footstep_action import NO_STEP
+from src.gaitnet.actions.footstep_action import Sequence
+from rsl_rl.modules import ActorCritic
 from src import get_logger
-from src.contactnet.contactnet import CostMapGenerator
-from src.gaitnet.env_cfg.observations import get_terrain_mask
-from src.simulation.cfg.footstep_scanner_constants import idx_to_xy
-
-from src.contactnet.debug import view_footstep_cost_map
+from src.gaitnet.env_cfg.footstep_options_env import FootstepOptionEnv
+from torch.distributions import Normal, Categorical
+import src.constants as const
 
 logger = get_logger()
 
 
-class FootstepOptionGenerator:
-    def __init__(self, env: ManagerBasedRLEnv, num_options: int = 5):
-        self.env = env
-        self.num_options = num_options
-        self.cost_map_generator = CostMapGenerator(device=env.device)
-
-    def _filter_cost_map(
-        self, cost_map: torch.Tensor, obs: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Filter the cost map to remove invalid footstep options based on terrain and robot state.
-
-        Args:
-            cost_map: (num_envs, 4, H, W) raw cost maps for each leg
-            obs: (num_envs, obs_dim) observation tensor containing robot state
-
-        Returns:
-            filtered_cost_map: (num_envs, 4, H, W) cost maps with invalid options set to inf
-        """
-        # remove options with invalid terrain
-        valid_height_range = self.env.cfg.valid_height_range  # type: ignore
-        terrain_mask = get_terrain_mask(valid_height_range, obs)  # (num_envs, 4, H, W)
-        masked_cost_maps = torch.where(
-            terrain_mask, cost_map, torch.tensor(float("inf"), device=cost_map.device)
-        )
-
-        # remove options for legs in swing state
-        # here 18:22 are the contact states for the 4 legs
-        contact_states = obs[:, 18:22].bool()  # (num_envs, 4)
-        swing_states = ~contact_states  # (num_envs, 4)
-        masked_cost_maps = torch.where(
-            swing_states.unsqueeze(-1).unsqueeze(-1),
-            torch.tensor(float("inf"), device=cost_map.device),
-            masked_cost_maps,
-        )
-
-        # require minimum number leg to be in contact
-        # by setting all costs to inf if not enough legs in contact
-        min_legs_in_contact = 1
-        num_legs_in_contact = contact_states.sum(dim=1)  # (num_envs,)
-        contact_limit = num_legs_in_contact <= min_legs_in_contact  # (num_envs,)
-        masked_cost_maps = torch.where(
-            contact_limit.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1),
-            torch.tensor(float("inf"), device=cost_map.device),
-            masked_cost_maps,
-        )
-
-        return masked_cost_maps
-
-    @staticmethod
-    def _overall_best_options(
-        cost_map: torch.Tensor, num_options: int
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Get the overall best footstep options across all legs.
-
-        Args:
-            cost_map: (num_envs, 4, H, W) filtered cost maps for each leg
-
-        Returns:
-            best_options: (num_envs, num_options, 3) best options as (leg_idx, dx, dy)
-            best_values: (num_envs, num_options) corresponding costs
-        """
-        # get the best options
-        flat_cost_map = cost_map.flatten()
-        flat_cost_map = flat_cost_map.reshape(
-            cost_map.shape[0], -1
-        )  # (num_envs, 4*H*W)
-        # technically there is no need to sort here, but
-        # it will guarantee determinism
-        topk_values, topk_flat_indices = torch.topk(
-            flat_cost_map, num_options, largest=False, sorted=True
-        )  # (num_envs, num_options)
-
-        # unravel indices to (leg, idx, idy)
-        topk_indices = torch.unravel_index(topk_flat_indices, cost_map.shape[1:])
-        # to (num_envs, num_options, 3)
-        topk_indices = torch.stack(topk_indices, dim=-1)
-
-        # convert to (leg, x, y) to (leg, dx, dy)
-        topk_pos = idx_to_xy(topk_indices)  # (num_envs, num_options, 3)
-
-        return topk_pos, topk_values
-
-    @staticmethod
-    def _best_options_per_leg(
-        cost_map: torch.Tensor, num_options: int
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Get the best footstep options for each leg.
-
-        Args:
-            cost_map: (num_envs, 4, H, W) filtered cost maps for each leg
-
-        Returns:
-            best_options: (num_envs, num_options, 3) best options as (leg_idx, dx, dy)
-            best_values: (num_envs, num_options) corresponding costs
-        """
-
-        best_options = []
-        best_values = []
-        for leg in range(4):
-            leg_cost_map = cost_map[:, leg, :, :].unsqueeze(1)  # (num_envs, 1, H, W)
-            topk_pos, topk_values = FootstepOptionGenerator._overall_best_options(
-                leg_cost_map, num_options // 4
-            )
-            # manually set leg index
-            topk_pos[:, :, 0] = leg
-            best_options.append(topk_pos)
-            best_values.append(topk_values)
-
-        best_options = torch.cat(best_options, dim=1)  # (num_envs, num_options, 3)
-        best_values = torch.cat(best_values, dim=1)  # (num_envs, num_options)
-
-        return best_options, best_values
-
-    def get_footstep_options(
-        self, obs: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Generate footstep options based on the current environment state.
-
-        Returns:
-            torch.Tensor: Footstep options of shape (num_envs, num_options, 3)
-                          Each option is represented as (leg_index, x_offset, y_offset)
-                          total shape is (num_options, 3)
-            torch.Tensor: Corresponding costs of shape (num_envs, num_options)
-        """
-        with torch.inference_mode():
-            cost_maps = self.cost_map_generator.predict(obs)  # (num_envs, 4, H, W)
-            # switch from (FL, FR, RL, RR) to (FR, FL, RR, RL)
-            cost_maps = cost_maps[:, [1, 0, 3, 2], :, :]
-
-        masked_cost_maps = self._filter_cost_map(cost_maps, obs)  # (num_envs, 4, H, W)
-
-        # best_options, best_values = self._overall_best_options(masked_cost_maps, self.num_options)
-        best_options, best_values = self._best_options_per_leg(
-            masked_cost_maps, self.num_options
-        )
-        return best_options, best_values
-
-
-class Gaitnet(nn.Module):
+def make_mlp(
+    input_size, hidden_sizes, output_size, activation=nn.ReLU, output_activation=None
+) -> nn.Sequential:
     """
-    Value-based network for scoring individual footstep options and predicting swing duration.
-    This network learns to evaluate each footstep option independently.
-    """
+    Creates an MLP (multi-layer perceptron) in PyTorch.
 
+    Args:
+        input_size (int): Number of input features.
+        hidden_sizes (list[int]): Sizes of hidden layers.
+        output_size (int): Number of output features.
+        activation (nn.Module): Activation class for hidden layers (default: ReLU).
+        output_activation (nn.Module or None): Optional activation for output layer.
+
+    Returns:
+        nn.Sequential: The constructed MLP.
+    """
+    layers = []
+    in_size = input_size
+    for h in hidden_sizes:
+        layers.append(nn.Linear(in_size, h))
+        layers.append(activation())
+        in_size = h
+    layers.append(nn.Linear(in_size, output_size))
+    if output_activation is not None:
+        layers.append(output_activation())
+    return nn.Sequential(*layers)
+
+
+class GaitnetActor(nn.Module):
     def __init__(
         self,
-        get_footstep_options: Callable[
-            [
-                torch.Tensor,
-            ],
-            tuple[torch.Tensor, torch.Tensor],
-        ],
-        robot_state_dim: int = 22,
-        shared_encoder_dim: int = 128,
-        footstep_encoder_dim: int = 64,
-        hidden_dim: int = 256,
+        shared_state_dim: int,
+        shared_layer_sizes: Sequence[int],
+        unique_state_dim: int,
+        unique_layer_sizes: Sequence[int],
+        trunk_layer_sizes: Sequence[int],
     ):
         super().__init__()
+        logger.info("GaitnetActor initializing")
 
-        self.get_footstep_options = get_footstep_options
-
-        self.robot_state_dim = robot_state_dim
-
-        # Shared encoder for robot state
-        self.robot_state_encoder = nn.Sequential(
-            nn.Linear(robot_state_dim, shared_encoder_dim),
-            nn.LayerNorm(shared_encoder_dim),
-            nn.ReLU(),
-            nn.Linear(shared_encoder_dim, shared_encoder_dim),
-            nn.LayerNorm(shared_encoder_dim),
-            nn.ReLU(),
+        self.shared_encoder = make_mlp(
+            input_size=shared_state_dim,
+            hidden_sizes=shared_layer_sizes[:-1],
+            output_size=shared_layer_sizes[-1],
+            output_activation=nn.ReLU,
         )
-        logger.info(f"robot state encoder\n{self.robot_state_encoder}")
+        logger.info(f"shared_encoder: {self.shared_encoder}")
 
-        # Footstep option encoder (processes each option)
-        # Input: [leg_idx_one_hot(4), x_offset, y_offset, cost]
-        self.footstep_encoder = nn.Sequential(
-            nn.Linear(
-                4 + 2 + 1, footstep_encoder_dim
-            ),  # 4 for one-hot leg, 2 for x,y, 1 for cost
-            nn.LayerNorm(footstep_encoder_dim),
-            nn.ReLU(),
-            nn.Linear(footstep_encoder_dim, footstep_encoder_dim),
-            nn.LayerNorm(footstep_encoder_dim),
-            nn.ReLU(),
+        self.unique_encoder = make_mlp(
+            input_size=unique_state_dim,
+            hidden_sizes=unique_layer_sizes[:-1],
+            output_size=unique_layer_sizes[-1],
+            output_activation=nn.ReLU,
         )
-        logger.info(f"footstep encoder\n{self.footstep_encoder}")
+        self.unique_embedding_size = unique_layer_sizes[-1]
+        # random embedding to represent no-op
+        self.no_op_embedding = nn.Parameter(torch.randn(unique_layer_sizes[-1]))
+        logger.info(f"unique_encoder: {self.unique_encoder}")
 
-        # Shared trunk for both outputs
-        self.shared_trunk = nn.Sequential(
-            nn.Linear(shared_encoder_dim + footstep_encoder_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.LayerNorm(hidden_dim // 2),
-            nn.ReLU(),
+        trunk_input_dim = shared_layer_sizes[-1] + unique_layer_sizes[-1]
+        self.trunk = make_mlp(
+            input_size=trunk_input_dim,
+            hidden_sizes=trunk_layer_sizes[:-1],
+            output_size=trunk_layer_sizes[-1],
+            output_activation=nn.ReLU,
         )
-        logger.info(f"shared trunk\n{self.shared_trunk}")
+        logger.info(f"trunk: {self.trunk}")
 
-        # Value head: outputs reward value
-        self.value_head = nn.Linear(hidden_dim // 2, 1)
-        logger.info(f"value head\n{self.value_head}")
-
-        # Duration head: outputs swing duration
-        self.duration_head = nn.Sequential(
-            nn.Linear(hidden_dim // 2, 1),
-            nn.Sigmoid(),  # Normalize to [0, 1], scale later to actual duration range
+        self.value_head = make_mlp(
+            input_size=trunk_layer_sizes[-1], hidden_sizes=[], output_size=1
         )
-        logger.info(f"duration head\n{self.duration_head}")
+        logger.info(f"value_head: {self.value_head}")
 
-        # Special embedding for "no action" option
-        self.no_action_embedding = nn.Parameter(torch.randn(footstep_encoder_dim))
+        self.duration_head = make_mlp(
+            input_size=trunk_layer_sizes[-1],
+            hidden_sizes=[],
+            output_size=1,
+        )
+        logger.info(f"duration_head: {self.duration_head}")
 
-        # Duration range parameters (in seconds)
-        self.min_swing_duration = 0.1
-        self.max_swing_duration = 0.3
-
-    def forward(
-        self,
-        obs: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Forward pass to compute values and swing durations for all footstep options.
+    def forward(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass for the GaitNet actor.
 
         Args:
-            obs: (batch_size, 122) robot state information
+            obs (torch.Tensor): Input observations.
 
         Returns:
-            footstep_options: (batch_size, num_options + 1, 3), including no-action option: [NO_STEP, 0, 0, 0]
-                last idx is (leg, dx, dy)
-            values: (batch_size, num_options + 1) values for each option + no-action
-            durations: (batch_size, num_options + 1) swing durations for each option
-                no-action duration is 0
+            tuple[torch.Tensor, torch.Tensor]:
+                - logits: Action selection logits (num_envs, num_options)
+                - durations: Duration predictions for each option (num_envs, num_options)
         """
-        robot_state = obs[:, : self.robot_state_dim]
-        # (batch_size, num_options, 3)
-        # [leg_idx, dx, dy]
-        batch_size = robot_state.shape[0]
-        device = robot_state.device
-        # add numeric representation for no-action to footstep options
-        no_action_option = torch.zeros((batch_size, 1, 3), device=device)
-        no_action_option[:, :, 0] = NO_STEP  # leg_idx = NO_STEP
+        num_envs = obs.shape[0]
+        shared_state = obs[:, : const.gait_net.robot_state_dim]
 
-        # prepare footstep options
-        footstep_options, footstep_costs = self.get_footstep_options(obs)
-        # add no-action option to the list
-        footstep_options = torch.cat(
-            [footstep_options, no_action_option],
-            dim=1,
-        )  # (batch, num_options + 1, 3)
-        footstep_costs = torch.cat(
-            [footstep_costs, torch.full((batch_size, 1), float("inf"), device=device)],
-            dim=1,
-        )  # (batch, num_options + 1)
-        # set invalid options to no-action
-        inf_cost_mask = torch.isinf(footstep_costs)  # (batch, num_options)
-        footstep_options[inf_cost_mask] = no_action_option.expand_as(footstep_options)[
-            inf_cost_mask
-        ]
+        remaining_obs_size = obs.shape[1] - const.gait_net.robot_state_dim
+        unique_states_dim = remaining_obs_size / const.gait_net.footstep_option_dim
+        assert (
+            unique_states_dim.is_integer()
+        ), f"Expected unique_state_size ({const.gait_net.footstep_option_dim}) to evenly divide the remaining observation size ({remaining_obs_size}), got {unique_states_dim}"
+        unique_states_dim = int(unique_states_dim)
+        unique_states = obs[:, const.gait_net.robot_state_dim :].view(
+            num_envs, unique_states_dim, const.gait_net.footstep_option_dim
+        )
+        unique_states_iter = torch.split(unique_states, 1, dim=1)
 
-        # Encode robot state (shared for all options)
-        robot_features = self.robot_state_encoder(
-            robot_state
-        )  # (batch, shared_encoder_dim)
+        shared_embedding: torch.Tensor = self.shared_encoder(shared_state)
 
-        # Process each footstep option
-        option_values = []
-        option_durations = []
+        unique_embeddings = []
+        for unique_state in unique_states_iter:
+            # remove the extra dimension
+            unique_state = unique_state.squeeze(1)
+            # check if this is a no-op state
+            # note that the one hot encoding is [no_op, leg1, leg2, leg3, leg4]
+            no_op_mask = unique_state[:, 0] == 1
 
-        num_options = footstep_options.shape[1]
-
-        for i in range(num_options):
-            # Extract option
-            option = footstep_options[:, i, :]  # (batch, 3)
-            non_inf_mask_i = ~inf_cost_mask[:, i]
-
-            # Convert leg index to one-hot
-            leg_idx = option[:, 0].long()
-            leg_one_hot = torch.zeros((batch_size, 4), device=device)
-            leg_one_hot[non_inf_mask_i] = nn.functional.one_hot(
-                leg_idx[non_inf_mask_i], num_classes=4
-            ).float()  # (batch, 4)
-
-            dx = option[:, 1]  # (batch,)
-            dy = option[:, 2]  # (batch,)
-
-            cost = footstep_costs[:, i]  # (batch,)
-
-            # Combine footstep features
-            footstep_input = torch.cat(
-                [leg_one_hot, dx.unsqueeze(-1), dy.unsqueeze(-1), cost.unsqueeze(-1)],
-                dim=-1,
-            )  # (batch, 4+2+1)
-
-            # Encode footstep
-            # default to no-action embedding, calculate embedding for valid options
-            footstep_features = (
-                self.no_action_embedding.unsqueeze(0).expand(batch_size, -1).clone()
+            unique_embedding = torch.zeros(
+                (num_envs, self.unique_embedding_size), device=obs.device
             )
-            footstep_features[non_inf_mask_i] = self.footstep_encoder(
-                footstep_input[non_inf_mask_i]
+            if (~no_op_mask).any():
+                unique_embedding[~no_op_mask] = self.unique_encoder(
+                    unique_state[~no_op_mask]
+                )
+            if no_op_mask.any():
+                unique_embedding[no_op_mask] = self.no_op_embedding
+            unique_embeddings.append(unique_embedding)
+
+        unique_embeddings = torch.stack(unique_embeddings, dim=1)
+        trunk_input = torch.cat(
+            [
+                shared_embedding.unsqueeze(dim=1).expand(-1, unique_states_dim, -1),
+                unique_embeddings,
+            ],
+            dim=-1,
+        )
+        trunk_output = self.trunk(trunk_input)
+
+        logits = self.value_head(trunk_output).squeeze(-1)  # (num_envs, num_options)
+
+        # only calculate durations for non no-op options
+        duration = torch.zeros((num_envs, unique_states_dim), device=obs.device)
+        no_op_mask = unique_states[:, :, 0] == 1
+        duration[~no_op_mask] = self.duration_head(trunk_output[~no_op_mask]).squeeze(
+            -1
+        )  # (num_envs, num_options)
+
+        # Scale durations to reasonable range
+        min_dur, max_dur = const.gait_net.valid_swing_duration_range
+        scale = max_dur - min_dur
+        duration[~no_op_mask] = torch.sigmoid(duration[~no_op_mask]) * scale + min_dur
+
+        return logits, duration
+
+    @staticmethod
+    def act_inference(
+        actor: "GaitnetActor", observations: torch.Tensor
+    ) -> torch.Tensor:
+        """Deterministic action selection for inference.
+
+        Args:
+            observations: Observations (num_envs, obs_dim)
+
+        Returns:
+            actions: Deterministic actions (num_envs, 2) where:
+                     - Column 0: discrete action index (0-16)
+                     - Column 1: mean duration value
+        """
+        # Get logits and durations from actor
+        logits, duration_means = actor(observations)
+
+        # Select action with highest logit (deterministic)
+        action_index = torch.argmax(logits, dim=-1)  # (num_envs,)
+
+        # Use mean durations for the selected action (deterministic)
+        batch_size = action_index.shape[0]
+        batch_indices = torch.arange(batch_size, device=action_index.device)
+        selected_durations = duration_means[batch_indices, action_index]  # (num_envs,)
+
+        # Combine action index and duration into a single tensor
+        actions = torch.stack(
+            [action_index.float(), selected_durations], dim=-1
+        )  # (num_envs, 2)
+
+        return actions
+
+
+class GaitnetCritic(nn.Module):
+    def __init__(
+        self,
+        shared_state_dim: int,
+        shared_layer_sizes: Sequence[int],
+        num_unique_states: int,
+        unique_state_dim: int,
+        unique_layer_sizes: Sequence[int],
+        trunk_layer_sizes: Sequence[int],
+        trunk_combiner_head_sizes: Sequence[int] = [32, 32],
+    ):
+        super().__init__()
+        logger.info("GaitnetCritic initializing")
+
+        self.shared_encoder = make_mlp(
+            input_size=shared_state_dim,
+            hidden_sizes=shared_layer_sizes[:-1],
+            output_size=shared_layer_sizes[-1],
+            output_activation=nn.ReLU,
+        )
+        logger.info(f"shared_encoder: {self.shared_encoder}")
+
+        self.unique_encoder = make_mlp(
+            input_size=unique_state_dim,
+            hidden_sizes=unique_layer_sizes[:-1],
+            output_size=unique_layer_sizes[-1],
+            output_activation=nn.ReLU,
+        )
+        self.unique_embedding_size = unique_layer_sizes[-1]
+        # random embedding to represent no-op
+        self.no_op_embedding = nn.Parameter(torch.randn(unique_layer_sizes[-1]))
+        logger.info(f"unique_encoder: {self.unique_encoder}")
+
+        trunk_input_dim = shared_layer_sizes[-1] + unique_layer_sizes[-1]
+        self.trunk = make_mlp(
+            input_size=trunk_input_dim,
+            hidden_sizes=trunk_layer_sizes,
+            output_size=1,
+        )
+        logger.info(f"trunk: {self.trunk}")
+
+        self.trunk_combiner_head = make_mlp(
+            input_size=num_unique_states,
+            hidden_sizes=trunk_combiner_head_sizes,
+            output_size=1,
+        )
+        logger.info(f"trunk_combiner_head: {self.trunk_combiner_head}")
+
+    def forward(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass for the MiMo network.
+
+        Args:
+            obs (torch.Tensor): Input observations.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Value and duration predictions.
+        """
+        num_envs = obs.shape[0]
+        shared_state = obs[:, : const.gait_net.robot_state_dim]
+
+        remaining_obs_size = obs.shape[1] - const.gait_net.robot_state_dim
+        unique_states_dim = remaining_obs_size / const.gait_net.footstep_option_dim
+        assert (
+            unique_states_dim.is_integer()
+        ), f"Expected unique_state_size ({const.gait_net.footstep_option_dim}) to evenly divide the remaining observation size ({remaining_obs_size}), got {unique_states_dim}"
+        unique_states_dim = int(unique_states_dim)
+        unique_states = obs[:, const.gait_net.robot_state_dim :].view(
+            num_envs, unique_states_dim, const.gait_net.footstep_option_dim
+        )
+        unique_states_iter = torch.split(unique_states, 1, dim=1)
+
+        shared_embedding: torch.Tensor = self.shared_encoder(shared_state)
+
+        unique_embeddings = []
+        for unique_state in unique_states_iter:
+            # remove the extra dimension
+            unique_state = unique_state.squeeze(1)
+            # check if this is a no-op state
+            no_op_mask = unique_state[:, 4] == 1
+            # also treat high cost as no-op
+            no_op_mask = no_op_mask | (unique_state[:, -1] >= 2.0)
+
+            unique_embedding = torch.zeros(
+                (num_envs, self.unique_embedding_size), device=obs.device
             )
+            if (~no_op_mask).any():
+                unique_embedding[~no_op_mask] = self.unique_encoder(
+                    unique_state[~no_op_mask]
+                )
+            if no_op_mask.any():
+                unique_embedding[no_op_mask] = self.no_op_embedding
+            unique_embeddings.append(unique_embedding)
 
-            # Combine with robot state and compute outputs
-            combined = torch.cat([robot_features, footstep_features], dim=-1)
-            trunk_features = self.shared_trunk(combined)
+        unique_embeddings = torch.stack(unique_embeddings, dim=1)
+        trunk_input = torch.cat(
+            [
+                shared_embedding.unsqueeze(dim=1).expand(-1, unique_states_dim, -1),
+                unique_embeddings,
+            ],
+            dim=-1,
+        )
+        values = self.trunk(trunk_input).squeeze(-1)  # (num_envs, num_unique_states)
+        # collapse the values across the unique states to a single value
+        # in theory this part should learn how we are using the output of the actor (single action selection)
+        value = self.trunk_combiner_head(values)  # (num_envs, 1)
 
-            # Get value and duration
-            value = self.value_head(trunk_features)  # (batch, 1)
-            duration = torch.zeros(
-                (batch_size, 1), device=device
-            )  # default to 0 for no-action
-            duration[non_inf_mask_i] = self.duration_head(
-                trunk_features[non_inf_mask_i]
-            )  # (batch, 1), in [0, 1]
-
-            # Scale duration to actual range
-            duration[non_inf_mask_i] = self.min_swing_duration + duration[
-                non_inf_mask_i
-            ] * (self.max_swing_duration - self.min_swing_duration)
-
-            option_values.append(value)
-            option_durations.append(duration)
-
-        # Stack all values and durations
-        all_values = torch.cat(option_values, dim=-1)  # (batch, num_options + 1)
-        all_durations = torch.cat(option_durations, dim=-1)  # (batch, num_options + 1)
-
-        # logger.info(f"cost: {footstep_costs[0].detach().cpu().numpy().tolist()}")
-        # # if all of footstep_costs[0] are inf
-        # if torch.all(torch.isinf(footstep_costs[0])):
-        #     pass
-        # logger.info(f"value: {all_values[0].detach().cpu().numpy().tolist()}")
-
-        if torch.isnan(all_values).any():
-            # lord help you...
-            logger.error("NaN in all_values!")
-
-        return footstep_options, all_values, all_durations
+        return value
 
 
-class GaitNetActorCritic(ActorCritic):
-    """
-    Actor-Critic network for footstep selection using value-based approach.
-    Compatible with RSL-RL.
-    """
-
+class GaitnetActorCritic(ActorCritic):
     def __init__(
         self,
         num_actor_obs,
         num_critic_obs,
         num_actions,
-        get_footstep_options: Callable[..., tuple[torch.Tensor, torch.Tensor]],
-        robot_state_dim=22,
-        num_footstep_options=5,
-        hidden_dims=[256, 256],
-        activation="relu",
+        actor: GaitnetActor,
+        critic: GaitnetCritic,
+        episode_info: dict[str, Any] | None = None,
         init_noise_std=1.0,
-        noise_std_type="scalar",
-        **kwargs,
+        noise_std_type: str = "scalar",
+        duration_std: float = 0.01,  # Standard deviation for duration noise
     ):
         """
-        Initialize the GaitNetActorCritic.
-        Args:
-            robot_state_dim (int, optional): Dimension of the robot state representation. Defaults to 22.
-            num_footstep_options (int, optional): Number of footstep options. Defaults to 5.
-            hidden_dims (list, optional): Hidden dimensions for the network. Defaults to [256, 256].
-        """
-        self.robot_state_dim = robot_state_dim
-        self.num_footstep_options = num_footstep_options
-        self.hidden_dims = hidden_dims
-        self.num_actions = num_actions
-
-        # Distribution for RL compatibility
-        self.distribution: torch.distributions.Categorical = None  # type: ignore
-
-        # Call parent constructor
-        super().__init__(
-            num_actor_obs=num_actor_obs,
-            num_critic_obs=num_critic_obs,
-            num_actions=num_actions,
-            actor_hidden_dims=hidden_dims,
-            critic_hidden_dims=hidden_dims,
-            activation=activation,
-            init_noise_std=init_noise_std,
-            noise_std_type=noise_std_type,
-            **kwargs,
-        )
-
-        # Override the actor with our custom value-based network
-        self.actor = Gaitnet(
-            get_footstep_options=get_footstep_options,
-            robot_state_dim=self.robot_state_dim,
-            shared_encoder_dim=hidden_dims[0] // 2,
-            footstep_encoder_dim=hidden_dims[0] // 4,
-            hidden_dim=hidden_dims[0],
-        )
-
-        # Replace the critic with our custom architecture
-        self.critic = nn.Sequential(
-            nn.Linear(num_critic_obs, hidden_dims[0]),
-            nn.LayerNorm(hidden_dims[0]),
-            nn.ReLU(),
-            nn.Linear(
-                hidden_dims[0],
-                hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0],
-            ),
-            nn.LayerNorm(hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0]),
-            nn.ReLU(),
-            nn.Linear(hidden_dims[1] if len(hidden_dims) > 1 else hidden_dims[0], 1),
-        )
-
-        # Cache for lazy evaluation
-        self._cached_observations: torch.Tensor = None  # type: ignore
-        self._cached_footstep_options: torch.Tensor = None  # type: ignore
-        self._cached_action_values: torch.Tensor = None  # type: ignore
-        self._cached_swing_durations: torch.Tensor = None  # type: ignore
-        self._cached_action_probs: torch.Tensor = None  # type: ignore
-        self._cached_selected_actions: torch.Tensor = None  # type: ignore
-        self._cached_selected_log_probs: torch.Tensor = None  # type: ignore
-
-    def _ensure_forward_pass(self, observations: torch.Tensor):
-        """
-        Ensure forward pass has been computed for given observations.
-        Uses caching to avoid redundant computation.
-        """
-        # Check if we need to compute or observations have changed
-        if self._cached_observations is None or not torch.equal(
-            self._cached_observations, observations
-        ):
-
-            # Perform forward pass
-            footstep_options, action_values, swing_durations = self.actor(observations)
-
-            # Convert to probabilities with softmax
-            action_probs = nn.functional.softmax(action_values, dim=-1)
-
-            # Cache results
-            self._cached_observations = observations.clone()
-            self._cached_footstep_options = footstep_options
-            self._cached_action_values = action_values
-            self._cached_swing_durations = swing_durations
-            self._cached_action_probs = action_probs
-
-    def update_distribution(self, observations: torch.Tensor):
-        """
-        Update the action distribution based on current observations.
-        Uses lazy evaluation - actual computation happens on first access.
-        """
-        # Ensure forward pass is computed
-        self._ensure_forward_pass(observations)
-
-        # Create categorical distribution from cached probabilities
-        self.distribution = torch.distributions.Categorical(self._cached_action_probs)
-
-    def act(self, observations: torch.Tensor, **kwargs) -> torch.Tensor:
-        """
-        Content-based action selection that's robust to option re-ordering.
 
         Args:
-            observations: (batch, num_obs) tensor of observations (robot state)
-
-        Returns:
-            actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
-                    For no-action: [NO_STEP, 0, 0, 0]
+            num_actor_obs (_type_): _description_
+            num_critic_obs (_type_): _description_
+            num_actions (_type_): _description_
+            actor (GaitnetActor): _description_
+            critic (GaitnetCritic): _description_
+            episode_info (dict[str, Any] | None, optional): Shared dictionary to dump episode data into
+            init_noise_std (float, optional): _description_. Defaults to 1.0.
+            noise_std_type (str, optional): _description_. Defaults to "scalar".
+            duration_std (float, optional): _description_. Defaults to 0.01.
         """
-        self._ensure_forward_pass(observations)
-        
-        batch_size = observations.shape[0]
-        
-        # Prepare actions with durations
-        actions_with_durations = torch.cat(
-            [self._cached_footstep_options, self._cached_swing_durations.unsqueeze(-1)],
-            dim=-1,
-        )  # (batch, num_options + 1, 4)
-        
-        if kwargs.get("deterministic", False):
-            # Vectorized deterministic selection
-            best_indices = self._cached_action_values.argmax(dim=1)  # (batch,)
-        else:
-            # Vectorized stochastic sampling
-            best_indices = torch.multinomial(self._cached_action_probs, 1).squeeze(1)  # (batch,)
-        
-        # Gather selected actions: (batch, 4)
-        selected_actions = actions_with_durations[
-            torch.arange(batch_size, device=observations.device), best_indices
-        ]
-        
-        # Compute log probs: (batch,)
-        selected_log_probs = torch.log(
-            self._cached_action_probs[
-                torch.arange(batch_size, device=observations.device), best_indices
-            ] + 1e-8
+        self.episode_info = episode_info
+        nn.Module.__init__(self)
+        logger.info("GaitnetActorCritic initializing")
+        logger.info(
+            "Note: num_actor_obs, num_critic_obs, and num_actions are not used in making the actor and critic."
         )
-        
-        # Cache for efficiency
-        self._cached_selected_actions = selected_actions.clone()
-        self._cached_selected_log_probs = selected_log_probs
-        
-        return selected_actions
-    def act_inference(self, observations: torch.Tensor) -> torch.Tensor:
-        """
-        Deterministic action selection for inference/evaluation.
-
-        Args:
-            observations: (batch, num_obs) tensor of observations
-
-        Returns:
-            actions: (batch, 4) tensor with [leg_idx, dx, dy, swing_duration]
-        """
-        actions = self.act(observations, deterministic=True)
-        return actions
-
-    def get_actions_log_prob(self, actions: torch.Tensor) -> torch.Tensor:
-        """
-        Compute log probabilities based on action content, not indices.
-        
-        NOTE: PPO calls act() with the mini-batch observations BEFORE calling this method,
-        so the cache should be valid for the current mini-batch.
-
-        Args:
-            actions: (batch, 4) tensor of actions [leg_idx, dx, dy, swing_duration]
-
-        Returns:
-            log_probs: (batch,) tensor of log probabilities
-        """
-        # Quick path: if actions match cached selected actions exactly
-        if (
-            self._cached_selected_actions is not None
-            and actions.shape == self._cached_selected_actions.shape
-            and actions.device == self._cached_selected_actions.device
-            and torch.allclose(actions, self._cached_selected_actions, rtol=1e-5, atol=1e-8)
-        ):
-            return self._cached_selected_log_probs
-
-        # Vectorized matching on footstep content only (ignore duration)
-        batch_size = actions.shape[0]
-        device = actions.device
-        
-        # Extract footstep part: [leg_idx, dx, dy]
-        actions_footstep = actions[:, :3]  # (batch, 3)
-        options_footstep = self._cached_footstep_options  # (batch, num_options+1, 3)
-        
-        # Compute pairwise differences: (batch, num_options+1, 3)
-        # Expand dims for broadcasting: (batch, 1, 3) vs (batch, num_options+1, 3)
-        differences = torch.abs(
-            actions_footstep.unsqueeze(1) - options_footstep
-        )  # (batch, num_options+1, 3)
-        
-        # Sum across feature dimension to get total difference per option
-        total_diff = differences.sum(dim=-1)  # (batch, num_options+1)
-        
-        # Find best matching option for each batch element
-        best_match_indices = torch.argmin(total_diff, dim=-1)  # (batch,)
-        
-        # Optional: Check if matching failed (for debugging)
-        min_diffs = total_diff[torch.arange(batch_size, device=device), best_match_indices]
-        if torch.any(min_diffs > 1e-4):
-            num_failed = (min_diffs > 1e-4).sum().item()
-            max_diff = min_diffs.max().item()
-            logger.warning(
-                f"Action matching failed for {num_failed}/{batch_size} samples! "
-                f"Max difference: {max_diff:.6f}"
-            )
-        
-        # Gather log probabilities using matched indices
-        log_probs = torch.log(
-            self._cached_action_probs[
-                torch.arange(batch_size, device=device), 
-                best_match_indices
-            ] + 1e-8
+        logger.debug(
+            f"num_actor_obs: {num_actor_obs}, num_critic_obs: {num_critic_obs}, num_actions: {num_actions}"
         )
-        
-        return log_probs
+
+        self.actor = actor
+        self.critic = critic
+
+        # Store the number of options (should match num_actions from environment)
+        self.num_options = (
+            const.gait_net.num_footstep_options * const.robot.num_legs + 1
+        )  # +1 for no-op
+
+        # Action distribution components (populated in update_distribution)
+        self.discrete_distribution: Categorical | None = None  # For action selection
+        self.duration_distribution: Normal | None = None  # For duration values
+
+        # Duration standard deviation (fixed for now, could be learned)
+        self.duration_std = duration_std
+
+        # Cache for storing selected action indices and durations
+        self._last_action_indices: torch.Tensor | None = None
+        self._last_sampled_durations: torch.Tensor | None = None
+        self._cached_duration_means: torch.Tensor | None = None
+
+    def reset(self, dones=None):
+        """Reset recurrent states (no-op for non-recurrent policy)."""
+        pass
+
+    def forward(self):
+        raise NotImplementedError
 
     @property
     def action_mean(self):
-        """ this model is not compatiable with adaptive schedules
+        """Return the mean of the distribution (for logging).
+
+        Returns shape (num_envs, 2) with:
+        - Column 0: discrete action index (mode of categorical)
+        - Column 1: duration mean for the most likely action
         """
-        return torch.zeros(1)
+        if self.discrete_distribution is None or self.duration_distribution is None:
+            raise RuntimeError(
+                "Distribution not initialized. Call update_distribution first."
+            )
+
+        # Get the mode (argmax) of the discrete distribution
+        discrete_mode = torch.argmax(
+            self.discrete_distribution.logits, dim=-1
+        )  # (num_envs,)
+
+        # Get duration mean for the most likely action
+        batch_size = discrete_mode.shape[0]
+        batch_indices = torch.arange(batch_size, device=discrete_mode.device)
+        duration_mean = self.duration_distribution.mean[
+            batch_indices, discrete_mode
+        ]  # (num_envs,)
+
+        return torch.stack(
+            [discrete_mode.float(), duration_mean], dim=-1
+        )  # (num_envs, 2)
 
     @property
     def action_std(self):
-        """ this model is not compatiable with adaptive schedules
+        """Return std for logging compatibility with PPO.
+
+        Returns shape (num_envs, 2) with:
+        - Column 0: dummy std for discrete action (set to 1.0)
+        - Column 1: duration std
         """
-        return torch.zeros(1)
+        if self.discrete_distribution is None or self.duration_distribution is None:
+            return torch.ones(1, 2)
+
+        num_envs = self.discrete_distribution.logits.shape[0]
+        device = self.discrete_distribution.logits.device
+
+        # Dummy std for discrete action
+        discrete_std = torch.ones(num_envs, 1, device=device)
+
+        # Duration std (constant for all options)
+        duration_std = torch.full((num_envs, 1), self.duration_std, device=device)
+
+        return torch.cat([discrete_std, duration_std], dim=-1)
 
     @property
     def entropy(self):
+        """Return the entropy of the joint distribution.
+
+        For independent discrete and continuous components, total entropy is the sum.
         """
-        Entropy of the action distribution.
-        """
-        if self._cached_action_probs is None:
+        if self.discrete_distribution is None or self.duration_distribution is None:
             raise RuntimeError(
-                "Action probabilities not computed. Call _ensure_forward_pass() first."
+                "Distribution not initialized. Call update_distribution first."
             )
 
-        # Compute entropy directly from cached probabilities
-        # entropy = -sum(p * log(p))
-        log_probs = torch.log(
-            self._cached_action_probs + 1e-8
-        )  # Add small epsilon for numerical stability
-        entropy = -(self._cached_action_probs * log_probs).sum(dim=-1)  # (batch,)
-        return entropy
+        discrete_entropy = self.discrete_distribution.entropy()  # (num_envs,)
+        # For duration, sum entropy across all options (since we condition on action selection)
+        duration_entropy = self.duration_distribution.entropy().mean(
+            dim=-1
+        )  # (num_envs,)
 
-    def reset(self, dones=None):
+        return discrete_entropy + duration_entropy
+
+    def update_distribution(self, observations):
+        """Update the action distribution based on observations.
+
+        Creates a joint distribution over:
+        1. Discrete action selection (Categorical)
+        2. Continuous duration for each action (Normal)
+
+        Args:
+            observations: Observations (num_envs, obs_dim)
         """
-        Reset the cached values. Called between episodes.
+        # Get logits and duration means from actor
+        logits, duration_means = self.actor(observations)  # Access underlying actor
+        # logits: (num_envs, num_options)
+        # duration_means: (num_envs, num_options)
+
+        if self.episode_info is not None:
+            no_op_mask = duration_means == 0
+            op_mask = ~no_op_mask
+            if torch.any(op_mask):
+                leg_logits = logits[:, :-1].view(
+                    logits.shape[0], 4, -1
+                )  # (num_envs, 4, num_options)
+                leg_op_mask = (
+                    torch.sum(
+                        no_op_mask[:, :-1].view(no_op_mask.shape[0], 4, -1).long(),
+                        dim=-1,
+                    )
+                    == 0
+                )
+                # Use unbiased=False for faster std computation
+                per_leg_std = torch.std(leg_logits, dim=2, unbiased=False)[leg_op_mask]  # (num_ops,)
+                option_std = torch.mean(per_leg_std)  # (1,)
+                self.episode_info["leg_option_std"] = option_std.item()
+
+                # Faster correlation approximation using dot product
+                costs = observations[:, const.gait_net.robot_state_dim :].view(
+                    logits.shape[0], -1, const.gait_net.footstep_option_dim
+                )[:, :, -1]  # (num_envs, num_options, footstep_option_dim)
+                # Use simple normalized dot product instead of full corrcoef
+                logits_flat = logits[op_mask].flatten()
+                costs_flat = -costs[op_mask].flatten()
+                # Normalize
+                logits_norm = logits_flat - logits_flat.mean()
+                costs_norm = costs_flat - costs_flat.mean()
+                logits_norm = logits_norm / (logits_norm.std(unbiased=False) + 1e-8)
+                costs_norm = costs_norm / (costs_norm.std(unbiased=False) + 1e-8)
+                correlation = (logits_norm * costs_norm).mean()
+                self.episode_info["logit_cost_correlation"] = correlation.item()
+
+            else:
+                self.episode_info["leg_option_std"] = 0
+                self.episode_info["logit_cost_correlation"] = 0 
+
+        # Cache duration means for later use
+        self._cached_duration_means = duration_means
+
+        # remove all but the last no-op so it doesn't affect probabilities
+        num_options = logits.shape[1]
+        # Reshape to get per-option state
+        action_candidates = observations[:, const.gait_net.robot_state_dim :].view(
+            observations.shape[0], num_options, const.gait_net.footstep_option_dim
+        )
+        # Mask: True for valid actions, False for no-ops or high cost
+        no_op_mask = action_candidates[:, :, 0] == 1
+        # Apply mask to logits (set invalid actions to -inf so they get 0 probability)
+        masked_logits = logits.clone()
+        masked_logits[no_op_mask] = float("-inf")
+        masked_logits[:, -1] = logits[:, -1]  # always allow the last no-op option
+
+        self.discrete_distribution = Categorical(logits=masked_logits)
+
+        # Create continuous distribution for durations
+        duration_std = torch.full_like(duration_means, self.duration_std)
+        self.duration_distribution = Normal(duration_means, duration_std)
+
+    def act(self, observations, **kwargs):
+        """Sample actions from the policy.
+
+        Args:
+            observations: Observations (num_envs, obs_dim)
+
+        Returns:
+            actions: Sampled actions (num_envs, 2) where:
+                     - Column 0: discrete action index (0-16)
+                     - Column 1: sampled duration value
         """
-        self._cached_observations = None  # type: ignore
-        self._cached_footstep_options = None  # type: ignore
-        self._cached_action_values = None  # type: ignore
-        self._cached_swing_durations = None  # type: ignore
-        self._cached_action_probs = None  # type: ignore
-        self._cached_selected_actions = None  # type: ignore
-        self._cached_selected_log_probs = None  # type: ignore
-        self.distribution = None  # type: ignore
+        self.update_distribution(observations)
+
+        # Sample discrete action
+        action_index = self.discrete_distribution.sample()  # (num_envs,)
+
+        # Sample duration for the selected action
+        batch_size = action_index.shape[0]
+        batch_indices = torch.arange(batch_size, device=action_index.device)
+
+        # Sample from the duration distribution for the selected action
+        sampled_durations = self.duration_distribution.sample()[
+            batch_indices, action_index
+        ]  # (num_envs,)
+
+        # Combine action index and duration into a single tensor
+        actions = torch.stack(
+            [action_index.float(), sampled_durations], dim=-1
+        )  # (num_envs, 2)
+
+        if self.episode_info is not None:
+            no_op_index = const.gait_net.num_footstep_options * const.robot.num_legs
+            op_mask = action_index != no_op_index
+            if torch.any(op_mask):
+                # Use unbiased=False for faster computation
+                self.episode_info["duration_mean"] = torch.mean(
+                    sampled_durations[op_mask]
+                ).item()
+                self.episode_info["duration_std"] = torch.std(
+                    sampled_durations[op_mask], unbiased=False
+                ).item()
+                self.episode_info["ops_per_step"] = torch.mean(op_mask.float()).item()
+            else:
+                self.episode_info["duration_mean"] = 0
+                self.episode_info["duration_std"] = 0
+                self.episode_info["ops_per_step"] = 0
+
+        # Cache for log probability computation
+        self._last_action_indices = action_index
+        self._last_sampled_durations = sampled_durations
+
+        return actions
+
+    def get_actions_log_prob(self, actions):
+        """Get log probability of actions under current distribution.
+
+        This computes the JOINT log probability of:
+        1. Selecting the discrete action
+        2. Sampling the duration for that action
+
+        Args:
+            actions: Actions (num_envs, 2) where:
+                     - Column 0: discrete action index (0-16)
+                     - Column 1: sampled duration value
+
+        Returns:
+            log_probs: Joint log probabilities (num_envs,)
+        """
+        if self.discrete_distribution is None or self.duration_distribution is None:
+            raise RuntimeError(
+                "Distribution not initialized. Call update_distribution first."
+            )
+
+        # Extract action indices and durations
+        action_indices = actions[:, 0].long()  # (num_envs,)
+        sampled_durations = actions[:, 1]  # (num_envs,)
+
+        # Get log probability of discrete action selection
+        discrete_log_prob = self.discrete_distribution.log_prob(
+            action_indices
+        )  # (num_envs,)
+
+        # Get log probability of duration for the selected action
+        batch_size = action_indices.shape[0]
+        batch_indices = torch.arange(batch_size, device=action_indices.device)
+
+        # Evaluate log probability of these durations under the Normal distribution
+        # duration_distribution has shape (num_envs, num_options)
+        # We need to evaluate sampled_durations under the distribution for the selected action
+        duration_log_prob = self.duration_distribution.log_prob(
+            sampled_durations.unsqueeze(-1)
+        )[batch_indices, action_indices]
+
+        # Joint log probability is the sum (since they're independent given the action)
+        joint_log_prob = discrete_log_prob + duration_log_prob
+
+        return joint_log_prob
+
+    def act_inference(self, observations):
+        """Deterministic action selection for inference.
+
+        Args:
+            observations: Observations (num_envs, obs_dim)
+
+        Returns:
+            actions: Deterministic actions (num_envs, 2) where:
+                     - Column 0: discrete action index (0-16)
+                     - Column 1: mean duration value
+        """
+        return GaitnetActor.act_inference(self.actor, observations)
+
+    def evaluate(self, critic_observations, **kwargs):
+        """Evaluate the value function.
+
+        Args:
+            critic_observations: Observations (num_envs, obs_dim)
+
+        Returns:
+            values: State values (num_envs, 1)
+        """
+        return self.critic(critic_observations)

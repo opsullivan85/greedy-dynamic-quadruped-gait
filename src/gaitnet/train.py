@@ -1,6 +1,8 @@
 from isaaclab.app import AppLauncher
 import argparse
 
+from src.control.mpc.convex_MPC import Gait
+
 # add argparse arguments
 parser = argparse.ArgumentParser(
     description="Train an RL agent with Stable-Baselines3."
@@ -40,12 +42,14 @@ import signal
 import datetime
 import os
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # type: ignore
-from src.gaitnet.gaitnet import GaitNetActorCritic, FootstepOptionGenerator
+from src.gaitnet.env_cfg.footstep_options_env import FootstepOptionEnv
 import src.simulation.cfg.footstep_scanner_constants as fs
 from rsl_rl.runners import on_policy_runner
 import rsl_rl.modules
 from src.gaitnet.env_cfg.gaitnet_env import get_env
 from src.util import log_exceptions
+from src.gaitnet import gaitnet
+import src.constants as const
 from src import get_logger
 
 logger = get_logger()
@@ -70,36 +74,46 @@ logger = get_logger()
 
 
 def main():
-    env_cfg, env = get_env(
+    env = get_env(
         num_envs=args_cli.num_envs,
         device=args_cli.device,
+        manager_class=FootstepOptionEnv,
     )
+    episode_info = {}
+    env.episode_info = episode_info
+
+    gaitnet_actor = gaitnet.GaitnetActor(
+        shared_state_dim=const.gait_net.robot_state_dim,
+        shared_layer_sizes=[128, 128, 128],
+        unique_state_dim=const.gait_net.footstep_option_dim,
+        unique_layer_sizes=[64, 64],
+        trunk_layer_sizes=[128, 128, 128],
+    ).to(args_cli.device)
+
+    gaitnet_critic = gaitnet.GaitnetCritic(
+        shared_state_dim=const.gait_net.robot_state_dim,
+        shared_layer_sizes=[64, 64, 64],
+        num_unique_states=const.gait_net.num_footstep_options*const.robot.num_legs+1,  # +1 for the "no step" option
+        unique_state_dim=const.gait_net.footstep_option_dim,
+        unique_layer_sizes=[32, 32],
+        trunk_layer_sizes=[64, 64, 64],
+        trunk_combiner_head_sizes=[32, 32],
+    ).to(args_cli.device)
+
+    actor_critic_class = gaitnet.GaitnetActorCritic
+    on_policy_runner.__dict__[actor_critic_class.__name__] = actor_critic_class
 
     # wrap for RL training
     env = RslRlVecEnvWrapper(env)
 
-    obs_space = env.observation_space["policy"].shape[1]
-    robot_state_dim = obs_space - (4*fs.grid_size[0]*fs.grid_size[1])  # subtract height scan
-    # action_space = env.action_space.shape[1]
-    # 2 per leg
-    num_footstep_candidates = 16
-
-    footstep_option_generator = FootstepOptionGenerator(
-        env=env.unwrapped,
-        num_options=num_footstep_candidates,
-    )
-
-    # hack to get OnPolicyRunner to be able to initiate a GaitNetActorCritic
-    on_policy_runner.__dict__["GaitNetActorCritic"] = GaitNetActorCritic  # type: ignore
-
     # Create unique experiment name with timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_name = f"gaitnet_{timestamp}"
-    
+
     # Create unique log directory
     log_dir = f"./training/gaitnet/runs/{experiment_name}"
     save_dir = f"./training/gaitnet/checkpoints/{experiment_name}"
-    
+
     # Create directories if they don't exist
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(save_dir, exist_ok=True)
@@ -109,26 +123,33 @@ def main():
         "algorithm": {
             "class_name": "PPO",
             "schedule": "fixed",  # we don't support adaptive
-            "clip_param": 0.2,
-            "num_learning_epochs": 5,
+            # specified the proximal part of PPO - larger = faster at cost of stability
+            "clip_param": 0.3,
+            # how many times to use each batch of data for gradient updates
+            "num_learning_epochs": 8,
+            # number of minibatches to split one batch of data into
             "num_mini_batches": 4,
             "value_loss_coef": 0.5,
-            "entropy_coef": 0.01,
-            "learning_rate": 1e-4,
+            # controls entropy - higher = more exploration, slower convergence
+            "entropy_coef": 0.02,
+            # learning rate
+            "learning_rate": 3e-4,
+            # clips gradients to prevent unstable training
             "max_grad_norm": 1.0,
             "use_clipped_value_loss": True,
+            # decay rate of future rewards. Closer to 1 = long horizon, closer to 0 = short horizon
+            # H=1/(1-gamma); 0.98 corresponds to 2s, 0.99 to 5s
             "gamma": 0.99,
             "lam": 0.95,
         },
         "policy": {
-            "class_name": "GaitNetActorCritic",
-            "robot_state_dim": robot_state_dim,
-            "num_footstep_options": num_footstep_candidates,
-            "hidden_dims": [128, 128],
-            "get_footstep_options": footstep_option_generator.get_footstep_options,
+            "class_name": actor_critic_class.__name__,
+            "actor": gaitnet_actor,
+            "critic": gaitnet_critic,
+            "episode_info": episode_info,
         },
         "log_dir": log_dir,
-        "num_steps_per_env": 1000,  # ~2 episodes per batch (episode = 10s = 500 iterations)
+        "num_steps_per_env": 500,  # ~1 episodes per batch (episode = 20s = 500 iterations)
         "save_interval": 5,
         "empirical_normalization": False,
         "logger": "tensorboard",  # Explicitly set TensorBoard as logger
@@ -147,7 +168,7 @@ def main():
         runner.load(args_cli.resume)
 
     logger.info("Starting training...")
-    
+
     # Let the runner handle the entire training loop
     # This ensures proper TensorBoard logging continuity
     try:

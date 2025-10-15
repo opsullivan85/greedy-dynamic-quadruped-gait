@@ -6,6 +6,7 @@ import isaaclab_tasks.manager_based.locomotion.velocity.config.spot.mdp as spot_
 from isaaclab.managers import RewardTermCfg as RewTerm, SceneEntityCfg
 from isaaclab.utils import configclass
 from src.sim2real import Sim2RealInterface
+import src.constants as const
 
 
 def a_foot_in_swing(env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -40,16 +41,39 @@ def height_below_minimum(
     return bodies_below
 
 
+def no_op_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """No-op reward function. Rewards the agent for choosing the no-op action."""
+    actions: torch.Tensor = env.action_manager.action
+    action_indices = actions[:, 0]
+    # dont need to add one here because of zero indexing
+    # the no_op is always the last index
+    no_op_index = const.robot.num_legs * const.gait_net.num_footstep_options
+    reward = (action_indices == no_op_index).float()
+    return reward
+
+
+def op_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """op reward function. Rewards the agent for not choosing the no-op action."""
+    actions: torch.Tensor = env.action_manager.action
+    action_indices = actions[:, 0]
+    # dont need to add one here because of zero indexing
+    # the no_op is always the last index
+    no_op_index = const.robot.num_legs * const.gait_net.num_footstep_options
+    reward = (action_indices != no_op_index).float()
+    return reward
+
+
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
 
     # rewards
-    alive = RewTerm(func=mdp.is_alive, weight=0.2)
-    # a_foot_in_swing = RewTerm(func=a_foot_in_swing, weight=0.0)
+    alive = RewTerm(func=mdp.is_alive, weight=0.4   )
+    a_foot_in_swing = RewTerm(func=a_foot_in_swing, weight=0.0)
+    no_op = RewTerm(func=no_op_reward, weight=0.0)  # set with curriculum
     xy_tracking = RewTerm(
         func=mdp.track_lin_vel_xy_exp,
-        weight=0.1,
+        weight=0.5,
         params={
             "std": 0.5,
             "command_name": "base_velocity",
@@ -57,7 +81,7 @@ class RewardsCfg:
     )
     yaw_tracking = RewTerm(
         func=mdp.track_ang_vel_z_exp,
-        weight=0.1,
+        weight=0.5,
         params={
             "std": 0.5,
             "command_name": "base_velocity",
@@ -65,24 +89,26 @@ class RewardsCfg:
     )
 
     # penalties
-    terminating = RewTerm(func=mdp.is_terminated, weight=-300.0)
-    # lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    # ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    # flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2)
-    # foot_slip = RewTerm(
-    #     func=spot_mdp.foot_slip_penalty,
+    op_penalty = RewTerm(func=op_reward, weight=-2.5)  # set with curriculum
+    terminating = RewTerm(func=mdp.is_terminated, weight=-200.0)
+    joint_accelerations = RewTerm(func=mdp.joint_acc_l2, weight=0)  # set with curriculum
+    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.5)
+    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.1)
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-8.0)
+    foot_slip = RewTerm(
+        func=spot_mdp.foot_slip_penalty,
+        weight=-6,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
+            "threshold": 1.0,
+        },
+    )
+    # foot_too_low = RewTerm(
+    #     func=height_below_minimum,
     #     weight=-1,
     #     params={
     #         "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
-    #         "threshold": 1.0,
+    #         "minimum_height": 0.0,
     #     },
     # )
-    foot_too_low = RewTerm(
-        func=height_below_minimum,
-        weight=-20,
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
-            "minimum_height": 0.0,
-        },
-    )

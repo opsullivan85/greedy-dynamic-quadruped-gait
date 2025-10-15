@@ -1,3 +1,4 @@
+from typing import TypeVar
 from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
 from isaaclab.sensors import SensorBaseCfg
 from isaaclab.utils import configclass
@@ -37,6 +38,7 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
 
     robot_controllers: VectorPool[sim2real.Sim2RealInterface] = None  # type: ignore to be set later
 
+    # TODO: do this the right way
     # ['trunk', 'FL_hip', 'FR_hip', 'RL_hip', 'RR_hip', 'FL_thigh', 'FR_thigh', 'RL_thigh', 'RR_thigh', 'FL_calf', 'FR_calf', 'RL_calf', 'RR_calf', 'FL_foot', 'FR_foot', 'RL_foot', 'RR_foot']
     hip_indices = np.asarray([1, 2, 3, 4], dtype=np.int32)
     """In order: FL, FR, RL, RR"""
@@ -46,12 +48,10 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
     """In order: FL, FR, RL, RR"""
     foot_indices = np.asarray([13, 14, 15, 16], dtype=np.int32)
 
-    valid_height_range = (0, -0.5)  # (max, min)
-
     def __post_init__(self):
         """Post initialization."""
         # general settings
-        self.decimation = 5  # env decimation -> 50 Hz footstep planning
+        self.decimation = 10  # env decimation -> 25 Hz footstep planning
         self.render_interval = (
             self.decimation / 2
         )  # render faster than footstep planning rate
@@ -59,7 +59,7 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 0.004  # simulation timestep -> 250 Hz physics
         self.sim.physics_material = self.scene.terrain.physics_material
 
-        self.episode_length_s = 10
+        self.episode_length_s = 20
 
 
 def _make_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
@@ -97,12 +97,14 @@ def _update_controllers(
     )
     cfg.robot_controllers = controllers  # type: ignore
 
+# generic for manager_class
+T = TypeVar("T", bound=ManagerBasedRLEnv)
 
 def get_env(
-    num_envs: int, device: str
-) -> tuple[GaitNetEnvCfg, ManagerBasedRLEnv]:
+    num_envs: int, device: str, manager_class: type[T] = ManagerBasedRLEnv
+) -> T:
     """Get the environment configuration and the environment instance."""
     env_cfg = _make_env_cfg(num_envs, device)
-    env = ManagerBasedRLEnv(cfg=env_cfg)
+    env = manager_class(cfg=env_cfg)
     _update_controllers(env_cfg, num_envs)
-    return env_cfg, env
+    return env

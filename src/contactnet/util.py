@@ -14,7 +14,7 @@ parser.add_argument(
     "--checkpoint-name",
     type=str,
     default=None,
-    help="Path to the model checkpoint to evaluate. Should be the name of a folder within training/checkpoints. best_model.pt is automatically used from there.",
+    help="Path to the model checkpoint to evaluate. Should be the name of a folder within training/contactnet/checkpoints. best_model.pt is automatically used from there.",
 )
 args, unused_args = parser.parse_known_args()
 
