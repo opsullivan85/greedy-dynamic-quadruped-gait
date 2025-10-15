@@ -42,11 +42,11 @@ import signal
 import datetime
 import os
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # type: ignore
-from src.gaitnet.env_cfg.footstep_options_env import FootstepOptionEnv
+from src.gaitnet.components.gaitnet_env import GaitNetEnv
 import src.simulation.cfg.footstep_scanner_constants as fs
 from rsl_rl.runners import on_policy_runner
 import rsl_rl.modules
-from src.gaitnet.env_cfg.gaitnet_env import get_env
+from src.gaitnet.env_cfg.gaitnet_env_cfg import get_env
 from src.util import log_exceptions
 from src.gaitnet import gaitnet
 import src.constants as const
@@ -77,7 +77,7 @@ def main():
     env = get_env(
         num_envs=args_cli.num_envs,
         device=args_cli.device,
-        manager_class=FootstepOptionEnv,
+        manager_class=GaitNetEnv,
     )
     episode_info = {}
     env.episode_info = episode_info

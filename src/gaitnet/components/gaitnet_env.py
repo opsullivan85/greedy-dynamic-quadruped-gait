@@ -13,13 +13,17 @@ import copy
 
 from src import get_logger
 from src.gaitnet.actions.mpc_action import ManagerBasedEnv
-from src.gaitnet.env_cfg.footstep_options_manager import FootstepObservationManager
+from src.gaitnet.components.noisy_candidate_sampler import NoisyCandidateSampler
+from src.gaitnet.components.gaitnet_observation_manager import (
+    GaitNetObservationManager,
+)
+import src.constants as const
 
 logger = get_logger()
 
 
-class FootstepOptionEnv(ManagerBasedRLEnv):
-    def __init__(self, episode_info: dict[str, Any]|None=None, *args, **kwargs):
+class GaitNetEnv(ManagerBasedRLEnv):
+    def __init__(self, episode_info: dict[str, Any] | None = None, *args, **kwargs):
         self.episode_info = episode_info
         super().__init__(*args, **kwargs)
 
@@ -41,8 +45,13 @@ class FootstepOptionEnv(ManagerBasedRLEnv):
         print("[INFO] Action Manager: ", self.action_manager)
         # -- observation manager
         # Note that this is the one change from the parent class
-        self.observation_manager = FootstepObservationManager(
-            self.cfg.observations, self
+        self.observation_manager = GaitNetObservationManager(
+            cfg=self.cfg.observations,
+            env=self,
+            footstep_option_generator=NoisyCandidateSampler(
+                env=self, options_per_leg=const.gait_net.num_footstep_options
+            ),
+            num_footstep_options=const.gait_net.num_footstep_options,
         )
         print("[INFO] Observation Manager:", self.observation_manager)
 
@@ -72,7 +81,7 @@ class FootstepOptionEnv(ManagerBasedRLEnv):
         # perform events at the start of the simulation
         if "startup" in self.event_manager.available_modes:
             self.event_manager.apply(mode="startup")
-    
+
     def step(self, action: torch.Tensor) -> VecEnvStepReturn:
         if self.episode_info is not None:
             for key, val in self.episode_info.items():
