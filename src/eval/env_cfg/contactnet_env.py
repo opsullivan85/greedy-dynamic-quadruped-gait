@@ -17,16 +17,13 @@ from src.gaitnet.components.footstep_candidate_sampler import FootstepCandidateS
 from src.gaitnet.components.gaitnet_observation_manager import (
     GaitNetObservationManager,
 )
+from src.gaitnet.components.gaitnet_env import GaitNetEnv
 import src.constants as const
 
 logger = get_logger()
 
 
-class GaitNetEnv(ManagerBasedRLEnv):
-    def __init__(self, episode_info: dict[str, Any] | None = None, *args, **kwargs):
-        self.episode_info = episode_info
-        super().__init__(*args, **kwargs)
-
+class ContactNetEnv(GaitNetEnv):
     def load_managers(self):
         # note: this order is important since observation manager needs to know the command and action managers
         # and the reward manager needs to know the termination manager
@@ -49,9 +46,10 @@ class GaitNetEnv(ManagerBasedRLEnv):
             cfg=self.cfg.observations,
             env=self,
             footstep_option_generator=FootstepCandidateSampler(
-                env=self, options_per_leg=const.gait_net.num_footstep_options
+                env=self, options_per_leg=1,  # just list the best options
+                noise=False  # don't apply any noise
             ),
-            num_footstep_options=const.gait_net.num_footstep_options,
+            num_footstep_options=1,
         )
         print("[INFO] Observation Manager:", self.observation_manager)
 
@@ -81,10 +79,3 @@ class GaitNetEnv(ManagerBasedRLEnv):
         # perform events at the start of the simulation
         if "startup" in self.event_manager.available_modes:
             self.event_manager.apply(mode="startup")
-
-    def step(self, action: torch.Tensor) -> VecEnvStepReturn:
-        if self.episode_info is not None:
-            for key, val in self.episode_info.items():
-                self.extras["log"][f"Custom_Metrics/{key}"] = val
-            self.episode_info.clear()
-        return super().step(action)

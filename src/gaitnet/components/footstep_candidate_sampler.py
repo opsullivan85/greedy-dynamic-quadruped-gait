@@ -9,15 +9,17 @@ from src.simulation.cfg.footstep_scanner_constants import idx_to_xy
 from src.util.math import seeded_uniform_noise
 
 
+
 import torch
 import torch.nn as nn
 
 
-class NoisyCandidateSampler:
-    def __init__(self, env: ManagerBasedEnv, options_per_leg: int):
+class FootstepCandidateSampler:
+    def __init__(self, env: ManagerBasedEnv, options_per_leg: int, noise: bool = True):
         self.env = env
         self.cost_map_generator = CostMapGenerator(device=env.device)
         self.options_per_leg = options_per_leg
+        self.noise = noise
 
     def _filter_cost_map(
         self, cost_map: torch.Tensor, obs: torch.Tensor
@@ -117,7 +119,7 @@ class NoisyCandidateSampler:
         best_values = []
         for leg in range(cost_map.shape[1]):  # iterate over legs
             leg_cost_map = cost_map[:, leg, :, :].unsqueeze(1)  # (num_envs, 1, H, W)
-            topk_pos, topk_values = NoisyCandidateSampler._overall_best_options(
+            topk_pos, topk_values = FootstepCandidateSampler._overall_best_options(
                 leg_cost_map, options_per_leg
             )
             # manually set leg index
@@ -185,10 +187,8 @@ class NoisyCandidateSampler:
             cost_maps = self.cost_map_generator.predict(
                 contactnet_obs
             )  # (num_envs, 4, H, W)
-
         # switch from (FL, FR, RL, RR) to (FR, FL, RR, RL)
         cost_maps = cost_maps[:, [1, 0, 3, 2], :, :]
-
         if _debug_footstep_cost_map_all:
             view_footstep_cost_map(
                 cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
@@ -206,7 +206,6 @@ class NoisyCandidateSampler:
         ).squeeze(
             1
         )  # (num_envs, 4, H, W)
-
         if _debug_footstep_cost_map_all:
             view_footstep_cost_map(
                 cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
@@ -215,28 +214,25 @@ class NoisyCandidateSampler:
                 show_ticks=False,
             )
 
-        # apply determanistic noise to costmap to slightly spread apart the best options
-        # it is important that this is reproducable for the RL algorithm
-        noise = seeded_uniform_noise(cost_maps, cost_maps.shape[1:])
-        noise = (
-            noise * 2 * const.gait_net.upscale_costmap_noise
-            - const.gait_net.upscale_costmap_noise
-        )
-        cost_maps += noise
-
-        if _debug_footstep_cost_map_all:
-            view_footstep_cost_map(
-                cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
-                title="Noisy Footstep Cost Map",
-                save_figure=True,
-                show_ticks=False,
+        if self.noise:
+            noise = seeded_uniform_noise(cost_maps, cost_maps.shape[1:])
+            noise = (
+                noise * 2 * const.gait_net.upscale_costmap_noise
+                - const.gait_net.upscale_costmap_noise
             )
+            cost_maps += noise
+            if _debug_footstep_cost_map_all:
+                view_footstep_cost_map(
+                    cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
+                    title="Noisy Footstep Cost Map",
+                    save_figure=True,
+                    show_ticks=False,
+                )
 
-        masked_cost_maps = self._filter_cost_map(cost_maps, obs)  # (num_envs, 4, H, W)
-
+        cost_maps = self._filter_cost_map(cost_maps, obs)  # (num_envs, 4, H, W)
         if _debug_footstep_cost_map_all:
             view_footstep_cost_map(
-                masked_cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
+                cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
                 title="Masked Footstep Cost Map",
                 save_figure=True,
                 # show_ticks=False,
@@ -246,12 +242,11 @@ class NoisyCandidateSampler:
 
         # best_options, best_values = self._overall_best_options(masked_cost_maps, self.num_options)
         best_options, best_values = self._best_options_per_leg(
-            masked_cost_maps, self.options_per_leg
+            cost_maps, self.options_per_leg
         )
-
         if _debug_footstep_cost_map:
             applied_map = self._apply_options_to_cost_map(
-                masked_cost_maps, best_options
+                cost_maps, best_options
             )
             view_footstep_cost_map(
                 applied_map[0][[1, 0, 3, 2]].cpu().numpy(),
@@ -284,8 +279,4 @@ class NoisyCandidateSampler:
         result = torch.cat([best_options, best_values.unsqueeze(-1)], dim=-1)
         # (num_envs, num_options, 4) where each option is (leg, dx, dy, cost)
 
-        # shuffle the options to prevent any bias from ordering
-        # this is important because the policy might learn to ignore certain indices
-        # shuffle_indices = torch.randperm(result.shape[1], device=result.device)
-        # result = result[:, shuffle_indices, :]
         return result

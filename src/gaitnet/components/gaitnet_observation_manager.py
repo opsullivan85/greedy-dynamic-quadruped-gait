@@ -8,7 +8,7 @@ from isaaclab.managers import (
 
 import src.constants as const
 from src.gaitnet.actions.mpc_action import ManagerBasedEnv
-from src.gaitnet.components.noisy_candidate_sampler import NoisyCandidateSampler
+from src.gaitnet.components.footstep_candidate_sampler import FootstepCandidateSampler
 from src import get_logger
 
 logger = get_logger()
@@ -28,7 +28,7 @@ class GaitNetObservationManager(ObservationManager):
         self,
         cfg: object,
         env: ManagerBasedEnv,
-        footstep_option_generator: NoisyCandidateSampler,
+        footstep_option_generator: FootstepCandidateSampler,
         num_footstep_options: int,
     ):
         self.logged_update_history_warning = False
