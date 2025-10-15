@@ -62,7 +62,7 @@ class GaitNetEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 20
 
 
-def _make_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
+def get_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
     cfg = GaitNetEnvCfg()
 
     cfg.scene.num_envs = num_envs
@@ -79,7 +79,7 @@ def _make_env_cfg(num_envs: int, device: str) -> GaitNetEnvCfg:
     return cfg
 
 
-def _update_controllers(
+def update_controllers(
     cfg: GaitNetEnvCfg, num_envs: int
 ) -> None:
     """Update the controllers in the environment configuration.
@@ -104,7 +104,7 @@ def get_env(
     num_envs: int, device: str, manager_class: type[T] = ManagerBasedRLEnv
 ) -> T:
     """Get the environment configuration and the environment instance."""
-    env_cfg = _make_env_cfg(num_envs, device)
+    env_cfg = get_env_cfg(num_envs, device)
     env = manager_class(cfg=env_cfg)
-    _update_controllers(env_cfg, num_envs)
+    update_controllers(env_cfg, num_envs)
     return env
