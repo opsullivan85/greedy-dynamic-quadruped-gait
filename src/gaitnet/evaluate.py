@@ -56,6 +56,10 @@ from pathlib import Path
 import src.constants as const
 from src.util.timer import Timer
 from src import get_logger
+from src import PROJECT_ROOT
+
+data_path = PROJECT_ROOT / "data" / "contact_schedule" / "contact_schedule.csv"
+data_path.parent.mkdir(parents=True, exist_ok=True)
 
 logger = get_logger()
 
@@ -82,10 +86,17 @@ def load_model(checkpoint_path: Path, device: torch.device, deterministic: bool)
     agent.to(device)
     return agent
 
+def log_action(actions: torch.Tensor, env: FootstepOptionEnv):
+    fsc = env.action_manager.get_term("footstep_controller")  # type: ignore
+    action_data = fsc.action_indices_to_actions(actions)[0].cpu().numpy()
+    with open(data_path, "a") as f:
+        f.write(f"{action_data[0]},{action_data[1]},{action_data[2]},{action_data[3]}\n")
+
+
 
 def main():
     args_cli.device = "cpu"
-    deterministic = True
+    deterministic = False
     args_cli.num_envs = 1
     device = torch.device(args_cli.device)
     model = load_model(get_checkpoint_path(), device, deterministic=deterministic)
@@ -105,9 +116,7 @@ def main():
                 actions = gaitnet.GaitnetActor.act_inference(model, obs)
             if not deterministic:
                 actions = model.act(obs)
-            action = actions[0]
-            if action[0] != 32:
-                print(action[-1])
+            log_action(actions, env)
             obs_, rew, terminated, truncated, info = env.step(actions)
             # coerce type system
             obs = obs_["policy"]  # type: ignore
