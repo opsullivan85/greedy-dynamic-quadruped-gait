@@ -102,13 +102,9 @@ def main():
             obs = observations["policy"]  # type: ignore
             evaluator.process(env_step_info)
 
-    env.step(actions)
-    env.reset()
     logger.info("Evaluation complete.")
 
 
 if __name__ == "__main__":
     with log_exceptions(logger):
         main()
-    simulation_app.close()
-    logger.info("Closed simulation app.")
