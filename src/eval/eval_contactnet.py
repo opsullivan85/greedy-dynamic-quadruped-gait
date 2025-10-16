@@ -5,6 +5,18 @@ import argparse
 parser = argparse.ArgumentParser(
     description="Evaluate Contactnet"
 )
+parser.add_argument(
+    "--difficulty", type=float, default=0.1, help="Terrain difficulty for the environment"
+)
+parser.add_argument(
+    "--velocity", type=float, default=0.1, help="Base velocity for the environment"
+)
+parser.add_argument(
+    "--trials", type=int, default=2, help="Number of evaluation trials"
+)
+parser.add_argument(
+    "--num_envs", type=int, default=50, help="Number of parallel environments to run"
+)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -68,7 +80,7 @@ def get_actions(obs: torch.Tensor) -> torch.Tensor:
 
 def main():
     # args_cli.device = "cpu"
-    args_cli.num_envs = 50
+    # args_cli.num_envs = 50
     device = torch.device(args_cli.device)
 
     """Get the environment configuration and the environment instance."""
@@ -77,7 +89,7 @@ def main():
     # change terrain to all be same level and very long
     # over-ride control to be straight forward
     terrain_generator: TerrainGeneratorCfg = env_cfg.scene.terrain.terrain_generator  # type: ignore
-    terrain_generator.difficulty_range = (0.1, 0.1)
+    terrain_generator.difficulty_range = (args_cli.difficulty, args_cli.difficulty)
     terrain_generator.curriculum = False
     terrain_generator.size = (40, 1)
     terrain_generator.num_cols = args_cli.num_envs
@@ -86,7 +98,7 @@ def main():
     env_cfg.terminations.terrain_out_of_bounds.params["distance_buffer"] = 0.0
 
     env_cfg.commands.base_velocity = FixedVelocityCommandCfg(  # type: ignore
-        command=(0.2,0,0)
+        command=(args_cli.velocity, 0, 0)
     )
 
     env = ContactNetEnv(cfg=env_cfg)
@@ -94,7 +106,9 @@ def main():
     observations, info = env.reset()
     obs: torch.Tensor = observations["policy"]  # type: ignore
 
-    evaluator = Evaluator(env, observations, trials=2, name="contactnet_eval.csv")
+    # format difficulty and speed without decimal points
+    log_name = f"contactnet_eval_d{args_cli.difficulty}_v{args_cli.velocity}.csv"
+    evaluator = Evaluator(env, observations, trials=args_cli.trials, name=log_name)
 
     with torch.inference_mode():
         while not evaluator.done:
@@ -103,8 +117,14 @@ def main():
             observations, rew, terminated, truncated, info = env_step_info
             obs = observations["policy"]  # type: ignore
             evaluator.process(env_step_info)
+    
+    env.step(actions)
+    env.reset()
+    logger.info("Evaluation complete.")
 
 
 if __name__ == "__main__":
     with log_exceptions(logger):
         main()
+    simulation_app.close()
+    logger.info("Closed simulation app.")

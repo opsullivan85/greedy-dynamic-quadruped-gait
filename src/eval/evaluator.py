@@ -1,4 +1,4 @@
-from math import trunc
+from math import hypot, trunc
 import torch
 from isaaclab.assets import ArticulationData
 from isaaclab.envs import ManagerBasedRLEnv, VecEnvObs, VecEnvStepReturn
@@ -51,7 +51,9 @@ class Evaluator:
 
         self.dones = torch.logical_or(self.dones, dones)
         x_positions = robot_data.root_link_pos_w[:, 0]
-        self.terminal_distances[~self.dones] = x_positions[~self.dones]
+        y_positions = robot_data.root_link_pos_w[:, 1]
+        hypot = torch.sqrt(x_positions**2 + y_positions**2)
+        self.terminal_distances[~self.dones] = hypot[~self.dones]
         if torch.all(self.dones):
             self._reset()
 
