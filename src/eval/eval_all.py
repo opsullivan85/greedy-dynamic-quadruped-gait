@@ -150,7 +150,7 @@ def main():
     
     os.chdir(PROJECT_ROOT)
     eval_scripts = ["src.eval.eval_contactnet", "src.eval.eval_gaitnet"]
-    difficulties = [0.0, 0.05, 0.01, 0.15, 0.2]
+    difficulties = [0.0, 0.05, 0.1, 0.15, 0.2]
     speeds = [0.05, 0.1, 0.15, 0.2]
     
     # Calculate total iterations and create enumeration
