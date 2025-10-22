@@ -18,7 +18,7 @@ from src import get_logger
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.gaitnet.env_cfg.footstep_options_manager import FootstepObservationManager
+    from src.gaitnet.components.gaitnet_observation_manager import GaitNetObservationManager
 
 logger = get_logger()
 
@@ -46,7 +46,7 @@ class FSCActionTerm(ActionTerm):
         )
         self._processed_actions = self._raw_actions
     
-    def _get_option_manager(self) -> "FootstepObservationManager":
+    def _get_option_manager(self) -> "GaitNetObservationManager":
         """Get the footstep option manager.
 
         note that it isn't initilized until after the action term is initialized
@@ -54,7 +54,7 @@ class FSCActionTerm(ActionTerm):
         Returns:
             The footstep option manager.
         """
-        footstep_option_manager: "FootstepObservationManager" = self._env.observation_manager  # type: ignore
+        footstep_option_manager: "GaitNetObservationManager" = self._env.observation_manager  # type: ignore
         return footstep_option_manager
 
     @property
@@ -114,7 +114,7 @@ class FSCActionTerm(ActionTerm):
         durations = actions[:, 1]  # (num_envs,)
         
         # Get the footstep options from the observation manager
-        footstep_option_manager: "FootstepObservationManager" = (
+        footstep_option_manager: "GaitNetObservationManager" = (
             self._get_option_manager()
         )
         all_options = footstep_option_manager.footstep_options  # (num_envs, 17, 4) - last column is cost

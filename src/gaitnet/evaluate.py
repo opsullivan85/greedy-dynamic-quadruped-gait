@@ -44,11 +44,11 @@ import datetime
 import os
 from src.gaitnet.util import get_checkpoint_path
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper  # type: ignore
-from src.gaitnet.env_cfg.footstep_options_env import FootstepOptionEnv
+from src.gaitnet.components.gaitnet_env import GaitNetEnv
 import src.simulation.cfg.footstep_scanner_constants as fs
 from rsl_rl.runners import on_policy_runner
 import rsl_rl.modules
-from src.gaitnet.env_cfg.gaitnet_env import get_env
+from src.gaitnet.env_cfg.gaitnet_env_cfg import get_env
 from src.util import log_exceptions
 from src.gaitnet import actions, gaitnet
 import re
@@ -86,7 +86,7 @@ def load_model(checkpoint_path: Path, device: torch.device, deterministic: bool)
     agent.to(device)
     return agent
 
-def log_action(actions: torch.Tensor, env: FootstepOptionEnv):
+def log_action(actions: torch.Tensor, env: GaitNetEnv):
     fsc = env.action_manager.get_term("footstep_controller")  # type: ignore
     action_data = fsc.action_indices_to_actions(actions)[0].cpu().numpy()
     with open(data_path, "a") as f:
@@ -105,7 +105,7 @@ def main():
     env = get_env(
         num_envs=args_cli.num_envs,
         device=args_cli.device,
-        manager_class=FootstepOptionEnv,
+        manager_class=GaitNetEnv,
     )
     obs_, info = env.reset()
     obs: torch.Tensor = obs_["policy"]  # type: ignore

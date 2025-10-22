@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from src.gaitnet.actions.footstep_action import Sequence
 from rsl_rl.modules import ActorCritic
 from src import get_logger
-from src.gaitnet.env_cfg.footstep_options_env import FootstepOptionEnv
+from src.gaitnet.components.gaitnet_env import GaitNetEnv
 from torch.distributions import Normal, Categorical
 import src.constants as const
 

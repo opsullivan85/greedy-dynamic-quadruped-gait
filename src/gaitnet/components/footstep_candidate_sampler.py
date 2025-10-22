@@ -1,35 +1,24 @@
-"""Observation term to generate footstep options as an isaaclab observation."""
+import src.constants as const
+from src.contactnet.contactnet import CostMapGenerator
+from src.contactnet.debug import view_footstep_cost_map
+from src.gaitnet.actions.footstep_action import NO_STEP
+from src.gaitnet.actions.mpc_action import ManagerBasedEnv
+from src.gaitnet.env_cfg.observations import contact_state_indices, get_terrain_mask
+from src.simulation.cfg.footstep_scanner_constants import idx_to_xy
+from src.util.math import seeded_uniform_noise
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from isaaclab.managers import (
-    ObservationManager,
-)
-
-import src.constants as const
-from src.contactnet.contactnet import CostMapGenerator
-from src.gaitnet.actions.footstep_action import NO_STEP
-from src.gaitnet.actions.mpc_action import ManagerBasedEnv
-from src.gaitnet.env_cfg.observations import get_terrain_mask
-from src.simulation.cfg.footstep_scanner_constants import idx_to_xy
-from src.util.math import seeded_uniform_noise
-from src.contactnet.debug import view_footstep_cost_map
-from src import get_logger
-from src.gaitnet.env_cfg.observations import contact_state_indices
-
-logger = get_logger()
-
 
 _debug_footstep_cost_map = False
 _debug_footstep_cost_map_all = False
 
-
-class FootstepOptionGenerator:
-    def __init__(self, env: ManagerBasedEnv, options_per_leg: int):
+class FootstepCandidateSampler:
+    def __init__(self, env: ManagerBasedEnv, options_per_leg: int, noise: bool = True):
         self.env = env
         self.cost_map_generator = CostMapGenerator(device=env.device)
         self.options_per_leg = options_per_leg
+        self.noise = noise
 
     def _filter_cost_map(
         self, cost_map: torch.Tensor, obs: torch.Tensor
@@ -129,7 +118,7 @@ class FootstepOptionGenerator:
         best_values = []
         for leg in range(cost_map.shape[1]):  # iterate over legs
             leg_cost_map = cost_map[:, leg, :, :].unsqueeze(1)  # (num_envs, 1, H, W)
-            topk_pos, topk_values = FootstepOptionGenerator._overall_best_options(
+            topk_pos, topk_values = FootstepCandidateSampler._overall_best_options(
                 leg_cost_map, options_per_leg
             )
             # manually set leg index
@@ -197,10 +186,8 @@ class FootstepOptionGenerator:
             cost_maps = self.cost_map_generator.predict(
                 contactnet_obs
             )  # (num_envs, 4, H, W)
-
         # switch from (FL, FR, RL, RR) to (FR, FL, RR, RL)
         cost_maps = cost_maps[:, [1, 0, 3, 2], :, :]
-
         if _debug_footstep_cost_map_all:
             view_footstep_cost_map(
                 cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
@@ -218,7 +205,6 @@ class FootstepOptionGenerator:
         ).squeeze(
             1
         )  # (num_envs, 4, H, W)
-
         if _debug_footstep_cost_map_all:
             view_footstep_cost_map(
                 cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
@@ -227,28 +213,25 @@ class FootstepOptionGenerator:
                 show_ticks=False,
             )
 
-        # apply determanistic noise to costmap to slightly spread apart the best options
-        # it is important that this is reproducable for the RL algorithm
-        noise = seeded_uniform_noise(cost_maps, cost_maps.shape[1:])
-        noise = (
-            noise * 2 * const.gait_net.upscale_costmap_noise
-            - const.gait_net.upscale_costmap_noise
-        )
-        cost_maps += noise
-
-        if _debug_footstep_cost_map_all:
-            view_footstep_cost_map(
-                cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
-                title="Noisy Footstep Cost Map",
-                save_figure=True,
-                show_ticks=False,
+        if self.noise:
+            noise = seeded_uniform_noise(cost_maps, cost_maps.shape[1:])
+            noise = (
+                noise * 2 * const.gait_net.upscale_costmap_noise
+                - const.gait_net.upscale_costmap_noise
             )
+            cost_maps += noise
+            if _debug_footstep_cost_map_all:
+                view_footstep_cost_map(
+                    cost_map=cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
+                    title="Noisy Footstep Cost Map",
+                    save_figure=True,
+                    show_ticks=False,
+                )
 
-        masked_cost_maps = self._filter_cost_map(cost_maps, obs)  # (num_envs, 4, H, W)
-
+        cost_maps = self._filter_cost_map(cost_maps, obs)  # (num_envs, 4, H, W)
         if _debug_footstep_cost_map_all:
             view_footstep_cost_map(
-                masked_cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
+                cost_maps[0][[1, 0, 3, 2]].cpu().numpy(),
                 title="Masked Footstep Cost Map",
                 save_figure=True,
                 # show_ticks=False,
@@ -258,12 +241,11 @@ class FootstepOptionGenerator:
 
         # best_options, best_values = self._overall_best_options(masked_cost_maps, self.num_options)
         best_options, best_values = self._best_options_per_leg(
-            masked_cost_maps, self.options_per_leg
+            cost_maps, self.options_per_leg
         )
-
         if _debug_footstep_cost_map:
             applied_map = self._apply_options_to_cost_map(
-                masked_cost_maps, best_options
+                cost_maps, best_options
             )
             view_footstep_cost_map(
                 applied_map[0][[1, 0, 3, 2]].cpu().numpy(),
@@ -296,164 +278,4 @@ class FootstepOptionGenerator:
         result = torch.cat([best_options, best_values.unsqueeze(-1)], dim=-1)
         # (num_envs, num_options, 4) where each option is (leg, dx, dy, cost)
 
-        # shuffle the options to prevent any bias from ordering
-        # this is important because the policy might learn to ignore certain indices
-        # shuffle_indices = torch.randperm(result.shape[1], device=result.device)
-        # result = result[:, shuffle_indices, :]
         return result
-
-
-class FootstepObservationManager(ObservationManager):
-    """Assumes the 4 footstep scanner values are at the end of the observation.
-
-    Replaces the footstep scanner values with footstep options generated from the cost map.
-    """
-
-    def __init__(self, cfg: object, env: ManagerBasedEnv):
-        self.logged_update_history_warning = False
-        self.footstep_option_generator = FootstepOptionGenerator(env, options_per_leg=const.gait_net.num_footstep_options)
-        super().__init__(cfg, env)
-        self.footstep_options: torch.Tensor
-        """Stores the latest footstep options generated by the manager (num_envs, options_per_leg*4, 4).
-        Each option is represented as (leg_index, x_offset, y_offset, cost)."""
-        self._footstep_actions: torch.Tensor
-        self._overwrite_obs_dim()
-
-    @property
-    def footstep_actions(self) -> torch.Tensor:
-        """Get the latest footstep actions with durations from the policy.
-
-        Returns:
-            torch.Tensor: Footstep actions of shape (num_envs, options_per_leg*4+1, 4)
-                          Each action is represented as (leg_index, x_offset, y_offset, duration).
-        """
-        # If durations have been set by the policy, use them
-        if hasattr(self, "_footstep_actions") and self._footstep_actions is not None:
-            return self._footstep_actions
-
-        # Otherwise, return options with default durations for initialization
-        durations = torch.full(
-            (self.footstep_options.shape[0], self.footstep_options.shape[1], 1),
-            0.2,
-            device=self.footstep_options.device,
-        )
-        _footstep_actions = self.footstep_options.clone()
-        _footstep_actions[:, :, 3] = durations.squeeze(-1)
-        return _footstep_actions
-
-    def set_footstep_actions(
-        self, action_indices: torch.Tensor, durations: torch.Tensor
-    ) -> None:
-        """Set the footstep actions for the selected action indices.
-
-        This is called after action selection to attach durations to the selected options.
-
-        Args:
-            action_indices (torch.Tensor): Selected action indices of shape (num_envs,) or (num_envs, 1).
-            durations (torch.Tensor): Footstep durations for selected actions, shape (num_envs,).
-        """
-        # Create full action tensor from options
-        self._footstep_actions = self.footstep_options.clone()
-
-        # Flatten action_indices if it has shape (num_envs, 1)
-        if action_indices.dim() > 1:
-            action_indices = action_indices.squeeze(-1)
-
-        # Set durations for the selected options
-        batch_size = action_indices.shape[0]
-        batch_indices = torch.arange(batch_size, device=action_indices.device)
-
-        # Update durations at the selected indices
-        self._footstep_actions[batch_indices, action_indices, 3] = durations
-
-    def _overwrite_obs_dim(self) -> None:
-        """Overwrite the observation dimensions to account for footstep options."""
-        self._group_obs_dim
-        policy_obs_dim = self._group_obs_dim["policy"][0]
-        # if this is a list throw an error
-        if isinstance(policy_obs_dim, tuple):
-            raise NotImplementedError(
-                "FootstepObservationManager does not support list observation dimensions."
-            )
-        obs_dim: int = policy_obs_dim
-        obs_dim -= const.footstep_scanner.total_robot_features
-
-        # add in the footstep options
-        # TODO: pull this from the footstep_controller action
-        footstep_option_size = 8  # (leg_one_hot (5), dx, dy, cost)
-        # +1 is for the NO_STEP option
-        obs_dim += (
-            const.gait_net.num_footstep_options * const.robot.num_legs + 1
-        ) * footstep_option_size
-        self._group_obs_dim["policy"] = (obs_dim,)
-
-    @staticmethod
-    def footstep_options_to_one_hot(options: torch.Tensor) -> torch.Tensor:
-        """Convert footstep options to one-hot encoding.
-
-        Args:
-            options (torch.Tensor): Footstep options of shape (num_envs, options_per_leg*4, 4)
-                                    Each option is represented as (leg_index, x_offset, y_offset, cost).
-
-        Returns:
-            torch.Tensor: One-hot encoded footstep options of shape (num_envs, options_per_leg*4, embedding_dim)
-                where the no-op option is the first index in the one-hot encoding.
-        """
-        num_envs, num_options, _ = options.shape
-        embedding_dim = const.robot.num_legs + 1
-        # +1 for no-step option to remap everything from -1-3 to 0-4
-        one_hot = F.one_hot(options[:, :, 0].long() + 1, num_classes=embedding_dim)
-        # replace leg index with one-hot encoding
-        options_one_hot = torch.cat(
-            [one_hot.float(), options[:, :, 1:]], dim=-1
-        )  # (num_envs, num_options, 8)
-        return options_one_hot
-
-    def _modify_obs(self, obs: torch.Tensor) -> torch.Tensor:
-        self.footstep_options = self.footstep_option_generator.get_footstep_options(obs)
-        # (num_envs, options_per_leg*4, 4) where each option is (leg_index, x_offset, y_offset, cost)
-
-        one_hot_options = self.footstep_options_to_one_hot(self.footstep_options)
-
-        # Safety check: ensure no inf/nan values in observations
-        if torch.any(torch.isinf(self.footstep_options)) or torch.any(
-            torch.isnan(self.footstep_options)
-        ):
-            logger.error(
-                "Found inf/nan in footstep options! This will cause training instability."
-            )
-            logger.error(
-                f"Inf count: {torch.isinf(self.footstep_options).sum().item()}"
-            )
-            logger.error(
-                f"NaN count: {torch.isnan(self.footstep_options).sum().item()}"
-            )
-
-        # replace the footstep scanner values at the end of the observation with the flattened footstep options
-        obs = obs[:, : -const.footstep_scanner.total_robot_features]
-        obs = torch.cat([obs, one_hot_options.flatten(start_dim=1)], dim=1)
-        return obs
-
-    def compute_group(
-        self, group_name: str, update_history: bool = False
-    ) -> torch.Tensor | dict[str, torch.Tensor]:
-        obs = super().compute_group(group_name, update_history)
-        # only modify the policy observation group
-        if group_name != "policy":
-            return obs
-
-        if isinstance(obs, dict):
-            raise NotImplementedError(
-                "FootstepObservationManager does not support dict observations."
-            )
-
-        # the history will not be in the same shape as the observations
-        if update_history:
-            if not self.logged_update_history_warning:
-                logger.warning(
-                    "FootstepObservationManager history might not work as expected."
-                )
-                self.logged_update_history_warning = True
-
-        obs = self._modify_obs(obs)
-        return obs
