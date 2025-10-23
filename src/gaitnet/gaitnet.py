@@ -9,6 +9,7 @@ from src import get_logger
 from src.gaitnet.components.gaitnet_env import GaitNetEnv
 from torch.distributions import Normal, Categorical
 import src.constants as const
+import tensordict
 
 logger = get_logger()
 
@@ -93,7 +94,7 @@ class GaitnetActor(nn.Module):
         )
         logger.info(f"duration_head: {self.duration_head}")
 
-    def forward(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, obs) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass for the GaitNet actor.
 
         Args:
@@ -319,6 +320,9 @@ class GaitnetActorCritic(ActorCritic):
         init_noise_std=1.0,
         noise_std_type: str = "scalar",
         duration_std: float = 0.01,  # Standard deviation for duration noise
+        actor_obs_normalization=False,
+        critic_obs_normalization=False,
+        **kwargs,
     ):
         """
 
@@ -333,6 +337,8 @@ class GaitnetActorCritic(ActorCritic):
             noise_std_type (str, optional): _description_. Defaults to "scalar".
             duration_std (float, optional): _description_. Defaults to 0.01.
         """
+        self.actor_obs_normalization = actor_obs_normalization
+        self.critic_obs_normalization = critic_obs_normalization
         self.episode_info = episode_info
         nn.Module.__init__(self)
         logger.info("GaitnetActorCritic initializing")
@@ -342,6 +348,11 @@ class GaitnetActorCritic(ActorCritic):
         logger.debug(
             f"num_actor_obs: {num_actor_obs}, num_critic_obs: {num_critic_obs}, num_actions: {num_actions}"
         )
+        # warn that kwargs are ignored
+        if len(kwargs) > 0:
+            logger.warning(
+                f"GaitnetActorCritic received unused kwargs: {kwargs}"
+            )
 
         self.actor = actor
         self.critic = critic
@@ -450,6 +461,7 @@ class GaitnetActorCritic(ActorCritic):
         Args:
             observations: Observations (num_envs, obs_dim)
         """
+        observations = observations["policy"]
         # Get logits and duration means from actor
         logits, duration_means = self.actor(observations)  # Access underlying actor
         # logits: (num_envs, num_options)
@@ -527,6 +539,7 @@ class GaitnetActorCritic(ActorCritic):
                      - Column 1: sampled duration value
         """
         self.update_distribution(observations)
+        observations = observations["policy"]
 
         # Sample discrete action
         action_index = self.discrete_distribution.sample()  # (num_envs,)
@@ -635,4 +648,5 @@ class GaitnetActorCritic(ActorCritic):
         Returns:
             values: State values (num_envs, 1)
         """
+        critic_observations = critic_observations["policy"]
         return self.critic(critic_observations)

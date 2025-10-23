@@ -148,6 +148,10 @@ def main():
             "critic": gaitnet_critic,
             "episode_info": episode_info,
         },
+        "obs_groups": {  # no private observations
+            "policy": ["policy",],
+            "critic": ["policy",],
+        },
         "log_dir": log_dir,
         "num_steps_per_env": 500,  # ~1 episodes per batch (episode = 20s = 500 iterations)
         "save_interval": 5,
