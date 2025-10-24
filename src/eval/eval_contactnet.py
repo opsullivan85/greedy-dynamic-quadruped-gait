@@ -85,6 +85,7 @@ def main():
 
     """Get the environment configuration and the environment instance."""
     env_cfg = get_env_cfg(args_cli.num_envs, args_cli.device)
+    env_cfg.events.reset_base.params["pose_range"] = {"x": (-0.1, 0.1), "y": (-0.1, 0.1), "yaw": (0, 0)}
 
     # change terrain to all be same level and very long
     # over-ride control to be straight forward
