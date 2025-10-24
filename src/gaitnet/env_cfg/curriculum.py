@@ -33,10 +33,16 @@ def terrain_levels_vel(
     terrain: TerrainImporter = env.scene.terrain  # type: ignore
     termination_manager = env.termination_manager
 
-    move_down_given_failure = torch.rand(len(env_ids), device=env.device) < 0.1
-    move_up_given_success = torch.rand(len(env_ids), device=env.device) < 0.95
+    move_down_given_failure = torch.rand(len(env_ids), device=env.device) < 0.5  # P_d
+    move_up_given_success = torch.rand(len(env_ids), device=env.device) < 0.1  # P_u
+    # Given the two parameters above, we can expect the system to settle into
+    # a steady state success rate while the terrain levels are changing.
+    # The level will be $\frac{P_d}{P_u + P_d}$
+    # The magnitude of these combined with the magnitude of noise will determine
+    # how quickly the terrain levels change, and the variance around the mean level.
+    
     # random chance to move up or down regardless of success/failure
-    random_noise = torch.rand(len(env_ids), device=env.device) < 0.01
+    random_noise = torch.rand(len(env_ids), device=env.device) < 0.02
 
     # move up with some probability if you survived the whole time
     success = termination_manager.time_outs[env_ids]
