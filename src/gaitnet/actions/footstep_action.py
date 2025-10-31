@@ -152,6 +152,10 @@ class FSCActionTerm(ActionTerm):
 
         # processed_actions is now (num_envs, 4) - single action per env
         action = processed_actions_cpu  # (num_envs, 4)
+
+        # ablate swing duration if specified
+        if const.experiments.ablate_swing_duration:
+            action[:, 3] = const.experiments.constant_swing_duration
         
         # mask out invalid steps
         mask = action[:, 0] != NO_STEP
